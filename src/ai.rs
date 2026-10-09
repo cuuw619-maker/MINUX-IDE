@@ -28,6 +28,8 @@ pub struct AiSettings {
     pub custom_accent: String,
     pub animation_speed: f32,
     pub ui_scale: f32,
+    pub sidebar_width: f32,
+    pub icon_size: f32,
 }
 
 impl Default for AiSettings {
@@ -45,6 +47,8 @@ impl Default for AiSettings {
             custom_accent: "#6E9BFF".into(),
             animation_speed: 1.0,
             ui_scale: 1.0,
+            sidebar_width: 260.0,
+            icon_size: 18.0,
         }
     }
 }
@@ -63,7 +67,6 @@ pub fn suggested_models() -> &'static [&'static str] {
         "claude-3-5-haiku-latest",
         "meta-llama/Meta-Llama-3.3-70B-Instruct",
         "mistralai/Mistral-Small-24B-Instruct-2501",
-        "Qwen/Qwen2.5-Coder-32B-Instruct",
         "deepseek-chat",
     ]
 }
@@ -139,9 +142,19 @@ pub fn load_settings() -> AiSettings {
     };
     settings.custom_accent = normalize_hex_color(&settings.custom_accent);
     settings.ui_scale = if settings.ui_scale.is_finite() {
-        settings.ui_scale.clamp(0.85, 1.25)
+        settings.ui_scale.clamp(0.75, 1.50)
     } else {
         1.0
+    };
+    settings.sidebar_width = if settings.sidebar_width.is_finite() {
+        settings.sidebar_width.clamp(220.0, 420.0)
+    } else {
+        260.0
+    };
+    settings.icon_size = if settings.icon_size.is_finite() {
+        settings.icon_size.clamp(14.0, 28.0)
+    } else {
+        18.0
     };
     settings.recent_workspaces.truncate(8);
     settings
