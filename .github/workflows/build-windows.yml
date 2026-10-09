@@ -20,10 +20,15 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build single executable
+      - name: Build Rust host, C++ engine, and C# NativeAOT agent
         run: cargo build --release --target x86_64-pc-windows-msvc
 
       - name: Verify executable
