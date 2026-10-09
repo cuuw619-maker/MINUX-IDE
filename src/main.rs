@@ -286,7 +286,8 @@ fn toolbar_icon_button(
     let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 32.0), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
-    let hover_t = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
+    let hover_raw = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
+    let hover_t = unsafe { minux_ease_out_cubic(hover_raw) };
     if hover_t > 0.01 {
         let background = if selected { accent_bg } else { PANEL_RAISED };
         ui.painter().rect_filled(rect, egui::CornerRadius::same(5), background.gamma_multiply(hover_t));
