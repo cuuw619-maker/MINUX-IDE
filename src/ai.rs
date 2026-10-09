@@ -8,8 +8,8 @@ use std::{
     time::Duration,
 };
 
-const CHAT_URL: &str = "https://router.huggingface.co/v1/chat/completions";
-const MODELS_URL: &str = "https://router.huggingface.co/v1/models";
+const CHAT_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1/chat/completions";
+const MODELS_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1/models";
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOOL_ROUNDS: usize = 8;
 
@@ -34,7 +34,7 @@ impl Default for AiSettings {
     fn default() -> Self {
         Self {
             token: String::new(),
-            model: "Qwen/Qwen2.5-Coder-32B-Instruct".into(),
+            model: "gpt-4o-mini".into(),
             thinking_enabled: true,
             max_tokens: 2048,
             theme_accent: "ocean".into(),
@@ -59,12 +59,40 @@ pub struct AgentResponse {
 
 pub fn suggested_models() -> &'static [&'static str] {
     &[
+        "gpt-4o-mini",
+        "claude-3-5-haiku-latest",
+        "meta-llama/Meta-Llama-3.3-70B-Instruct",
+        "mistralai/Mistral-Small-24B-Instruct-2501",
+        "Qwen/Qwen2.5-Coder-32B-Instruct",
+        "deepseek-chat",
+    ]
+}
+
+fn legacy_hf_models() -> &'static [&'static str] {
+    &[
         "Qwen/Qwen2.5-Coder-32B-Instruct",
         "Qwen/Qwen3-8B",
         "deepseek-ai/DeepSeek-R1",
         "meta-llama/Llama-3.3-70B-Instruct",
         "mistralai/Mistral-7B-Instruct-v0.3",
     ]
+}
+
+pub fn normalize_duckduckgo_model_id(input: &str) -> Result<String, String> {
+    let value = input.trim().trim_matches(|c| c == '\'' || c == '"' || c == '`').trim();
+    let valid_chars = value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':' | b'@')
+    });
+    if value.is_empty()
+        || value.len() > 160
+        || !valid_chars
+        || value.starts_with('/')
+        || value.ends_with('/')
+        || value.contains("//")
+    {
+        return Err("Некорректный ID модели. Используй ID без пробелов, например gpt-4o-mini.".into());
+    }
+    Ok(value.to_owned())
 }
 
 fn config_path() -> PathBuf {
@@ -93,8 +121,15 @@ pub fn load_settings() -> AiSettings {
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
 
-    settings.model = normalize_model_id(&settings.model)
-        .unwrap_or_else(|_| AiSettings::default().model);
+    let stored_model = settings.model.trim().to_owned();
+    let known_legacy_model = legacy_hf_models().contains(&stored_model.as_str())
+        || stored_model == "zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct";
+    settings.model = if known_legacy_model {
+        AiSettings::default().model
+    } else {
+        normalize_duckduckgo_model_id(&stored_model)
+            .unwrap_or_else(|_| AiSettings::default().model)
+    };
     settings.corner_radius = settings.corner_radius.clamp(3, 14);
     settings.editor_font_size = settings.editor_font_size.clamp(11.0, 20.0);
     settings.animation_speed = if settings.animation_speed.is_finite() {
@@ -141,7 +176,7 @@ pub fn normalize_model_id(input: &str) -> Result<String, String> {
 
     // Older settings could append the default model ID to a user selection.
     // Preserve the valid model prefix before that known default suffix.
-    for candidate in suggested_models() {
+    for candidate in legacy_hf_models() {
         if let Some(prefix) = value.strip_suffix(candidate) {
             let prefix = prefix.trim();
             if c_model_id_is_valid(prefix) {
@@ -150,7 +185,7 @@ pub fn normalize_model_id(input: &str) -> Result<String, String> {
         }
     }
 
-    let matches: Vec<&str> = suggested_models()
+    let matches: Vec<&str> = legacy_hf_models()
         .iter()
         .copied()
         .filter(|candidate| value.contains(candidate))
@@ -181,40 +216,42 @@ fn build_client() -> Result<Client, String> {
 }
 
 pub fn fetch_models(token: &str) -> Result<Vec<String>, String> {
-    if token.trim().is_empty() {
-        return Err("Сначала укажи Hugging Face Access Token.".into());
-    }
-
     let client = build_client()?;
-    let response = client.get(MODELS_URL).bearer_auth(token.trim()).send()
-        .map_err(|e| format!("Не удалось подключиться к Hugging Face: {e}"))?;
+    let mut request = client.get(MODELS_URL);
+    if !token.trim().is_empty() {
+        request = request.bearer_auth(token.trim());
+    }
+    let response = request.send()
+        .map_err(|e| format!("Не удалось получить каталог DuckDuckGo Chat API: {e}"))?;
     let status = response.status();
-    let body = response.text().map_err(|e| format!("Не удалось прочитать ответ Hugging Face: {e}"))?;
+    let body = response.text().map_err(|e| format!("Не удалось прочитать каталог моделей: {e}"))?;
 
     if !status.is_success() {
-        return Err(format_hf_error(status.as_u16(), &body));
+        return Err(format_api_error(status.as_u16(), &body));
     }
 
     let json: Value = serde_json::from_str(&body)
-        .map_err(|e| format!("Hugging Face вернул неожиданный список моделей: {e}"))?;
-    let items = json.get("data").and_then(Value::as_array)
-        .ok_or_else(|| "Ответ Hugging Face не содержит списка моделей.".to_string())?;
+        .map_err(|e| format!("Каталог моделей вернул неожиданный JSON: {e}"))?;
+    let items = json.get("data").or_else(|| json.get("models"))
+        .and_then(Value::as_array)
+        .or_else(|| json.as_array())
+        .ok_or_else(|| "Ответ каталога не содержит массива моделей. Можно выбрать модель из встроенного списка.".to_string())?;
 
     let mut models: Vec<String> = items.iter()
-        .filter_map(|item| item.get("id").and_then(Value::as_str).map(str::to_owned))
-        .filter(|id| !id.trim().is_empty())
+        .filter_map(|item| item.get("id").or_else(|| item.get("name")).or_else(|| item.get("model"))
+            .and_then(Value::as_str).map(str::to_owned))
+        .filter(|id| normalize_duckduckgo_model_id(id).is_ok())
         .collect();
     models.sort_unstable();
     models.dedup();
-    // Keep the model picker responsive when the account exposes a very large catalogue.
     models.truncate(300);
     if models.is_empty() {
-        return Err("Для этого токена API не вернул доступных моделей. Можно указать model ID вручную.".into());
+        return Err("Каталог не вернул модели. Встроенный список и ручной ввод остаются доступны.".into());
     }
     Ok(models)
 }
 
-fn format_hf_error(status: u16, body: &str) -> String {
+fn format_api_error(status: u16, body: &str) -> String {
     let parsed = serde_json::from_str::<Value>(body).ok();
     if status == 400
         && parsed.as_ref()
@@ -225,7 +262,7 @@ fn format_hf_error(status: u16, body: &str) -> String {
             .and_then(|value| value.pointer("/error/message").or_else(|| value.get("message")))
             .and_then(Value::as_str)
             .unwrap_or("Модель не существует или недоступна этому endpoint.");
-        return format!("MINUX Agent: Hugging Face не нашёл модель. Проверь точный ID и доступность Inference Provider. Открой настройки и выбери точную модель из списка доступных. {message}");
+        return format!("DuckDuckGo Chat API не распознал модель. Проверь ID или выбери вариант из каталога. {message}");
     }
 
     let detail = parsed
@@ -243,12 +280,12 @@ fn format_hf_error(status: u16, body: &str) -> String {
         detail
     };
     match status {
-        401 => format!("Hugging Face отклонил токен (401). Проверь Access Token и его разрешения. {detail}"),
-        403 => format!("Доступ запрещён (403). Проверь разрешения токена и доступ к модели. {detail}"),
-        404 => format!("Модель или endpoint не найдены (404). Проверь model ID и доступность провайдера. {detail}"),
-        429 => format!("Лимит Hugging Face превышен (429). Подожди или проверь квоты. {detail}"),
-        402 => format!("Провайдер требует доступный баланс/квоту (402). {detail}"),
-        _ => format!("Ошибка Hugging Face (HTTP {status}). {detail}"),
+        401 => format!("DuckDuckGo Chat API требует корректный токен (401). Токен в настройках необязателен, если endpoint разрешает анонимные запросы. {detail}"),
+        403 => format!("DuckDuckGo Chat API запретил доступ (403). Проверь доступ к сервису. {detail}"),
+        404 => format!("Endpoint или модель не найдены (404). Проверь ID модели и URL сервиса. {detail}"),
+        429 => format!("Лимит запросов превышен (429). Подожди и повтори запрос. {detail}"),
+        402 => format!("Сервис сообщил об ограничении квоты (402). {detail}"),
+        _ => format!("Ошибка DuckDuckGo Chat API (HTTP {status}). {detail}"),
     }
 }
 
@@ -257,23 +294,23 @@ pub fn run_agent(
     history: Vec<Value>,
     workspace_root: PathBuf,
 ) -> Result<AgentResponse, String> {
-    if settings.token.trim().is_empty() {
-        return Err("Открой Настройки → Hugging Face и укажи Access Token.".into());
-    }
     if settings.model.trim().is_empty() {
-        return Err("Укажи ID модели Hugging Face.".into());
+        return Err("Выбери модель из списка или введи её ID вручную.".into());
     }
     let mut settings = settings;
-    settings.model = normalize_model_id(&settings.model)?;
+    settings.model = normalize_duckduckgo_model_id(&settings.model)?;
 
     let root = workspace_root.canonicalize()
         .map_err(|e| format!("Не удалось открыть рабочую папку: {e}"))?;
     let client = build_client()?;
 
-    let system = format!(
+    let mut system = format!(
         "You are MINUX Agent, an AI coding assistant inside a local desktop IDE.\n        The user workspace root is: {}\n        For multi-file or cross-language requests, call project_overview first to learn the source-language mix and build manifests. Follow the existing architecture and make each change in the language best suited to the component; do not default to Rust when the project already uses another language for that part. Keep language boundaries small and document any new FFI or generated-file contract.\n        Inspect project files with list_project_files and search_project before making changes. Read each existing file before editing it. Prefer replace_in_file for a unique targeted change; use write_file only when replacing the complete intended file.\n        You can inspect and change project files with the provided tools. Use tools instead of claiming an operation is done.\n        All paths passed to tools must be relative to the workspace. Never access paths outside the workspace.\n        Never read or write secret files such as .env, private keys, credentials, or secret stores.\n        Preserve unrelated code and make minimal targeted changes. For new project structures, create directories and files through tools. Never delete files or execute shell commands.\n        When done, summarize concrete files changed and any checks that were or were not run.\n        Answer in the user's language. Do not invent tool results.",
         root.display()
     );
+    if settings.thinking_enabled {
+        system.push_str("\nWork carefully: check assumptions, inspect relevant files before edits, and verify consistency. Keep your final response concise and do not present hidden reasoning.");
+    }
 
     let mut messages: Vec<Value> = Vec::with_capacity(history.len() + 1);
     messages.push(json!({"role":"system","content":system}));
@@ -370,7 +407,6 @@ fn request_assistant(
     tools: &Value,
 ) -> Result<Value, String> {
     let mut active_messages = messages.to_vec();
-    let mut send_thinking = settings.thinking_enabled;
     let mut send_tools = true;
 
     for _attempt in 0..5 {
@@ -385,16 +421,14 @@ fn request_assistant(
             payload["tools"] = tools.clone();
             payload["tool_choice"] = json!("auto");
         }
-        if send_thinking {
-            payload["chat_template_kwargs"] = json!({"enable_thinking": true});
-        }
-
-        let response = client.post(CHAT_URL)
-            .bearer_auth(settings.token.trim())
+        let mut request = client.post(CHAT_URL)
             .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .map_err(|e| format!("Запрос к Hugging Face не выполнен: {e}"))?;
+            .json(&payload);
+        if !settings.token.trim().is_empty() {
+            request = request.bearer_auth(settings.token.trim());
+        }
+        let response = request.send()
+            .map_err(|e| format!("Запрос к DuckDuckGo Chat API не выполнен: {e}"))?;
 
         let status = response.status();
         let body = response.text().map_err(|e| format!("Не удалось прочитать ответ модели: {e}"))?;
@@ -415,16 +449,6 @@ fn request_assistant(
             continue;
         }
         if matches!(status.as_u16(), 400 | 422)
-            && send_thinking
-            && (lower.contains("chat_template_kwargs")
-                || lower.contains("unknown parameter")
-                || lower.contains("unsupported parameter"))
-        {
-            send_thinking = false;
-            continue;
-        }
-
-        if matches!(status.as_u16(), 400 | 422)
             && send_tools
             && (lower.contains("tool_choice")
                 || lower.contains("tool_calls")
@@ -442,10 +466,10 @@ fn request_assistant(
             continue;
         }
 
-        return Err(format_hf_error(status.as_u16(), &body));
+        return Err(format_api_error(status.as_u16(), &body));
     }
 
-    Err("Модель не приняла параметры thinking/tools после повторных попыток. Выбери другую модель или отключи thinking.".into())
+    Err("DuckDuckGo Chat API отклонил параметры запроса после повторных попыток. Выбери другую модель или отключи инструменты, если провайдер их не поддерживает.".into())
 }
 
 fn parse_assistant_message(response: &Value) -> Result<Value, String> {
@@ -1002,7 +1026,7 @@ fn write_workspace_file(root: &Path, relative: &str, content: &str) -> Result<St
 #[cfg(test)]
 mod model_id_tests {
     use std::path::Path;
-    use super::{normalize_hex_color, normalize_model_id, project_language, replace_exactly_once};
+    use super::{normalize_duckduckgo_model_id, normalize_hex_color, normalize_model_id, project_language, replace_exactly_once};
 
     #[test]
     fn repairs_concatenated_legacy_model_id() {
@@ -1020,6 +1044,14 @@ mod model_id_tests {
     #[test]
     fn rejects_unknown_multi_part_ids() {
         assert!(normalize_model_id("owner/model/second").is_err());
+    }
+
+    #[test]
+    fn accepts_duckduckgo_compatible_model_ids() {
+        assert_eq!(normalize_duckduckgo_model_id("gpt-4o-mini").unwrap(), "gpt-4o-mini");
+        assert_eq!(normalize_duckduckgo_model_id("org/model:v2").unwrap(), "org/model:v2");
+        assert!(normalize_duckduckgo_model_id("model id with spaces").is_err());
+        assert!(normalize_duckduckgo_model_id("/model").is_err());
     }
 
     #[test]
