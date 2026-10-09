@@ -4,24 +4,79 @@ unsafe extern "C" {
     fn minux_engine_version() -> u32;
 }
 
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 #[cfg(target_os = "windows")]
-unsafe extern "C" {
-    fn minux_agent_version() -> u32;
-}
+const CSHARP_AGENT_BINARY: &[u8] = include_bytes!(env!("MINUX_AGENT_EXE_PATH"));
 
 #[cfg(target_os = "windows")]
 fn agent_version() -> u32 {
-    unsafe { minux_agent_version() }
+    1
 }
 
 #[cfg(not(target_os = "windows"))]
 fn agent_version() -> u32 {
     0
 }
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+
+#[cfg(target_os = "windows")]
+fn run_csharp_agent(prompt: &str) -> Result<String, String> {
+    use std::{
+        io::Write,
+        os::windows::process::CommandExt,
+        process::{Command, Stdio},
+    };
+
+    let agent_path = std::env::temp_dir().join(format!(
+        "MINUXAgent-{}.exe",
+        env!("MINUX_AGENT_FINGERPRINT")
+    ));
+
+    if !agent_path.is_file() {
+        fs::write(&agent_path, CSHARP_AGENT_BINARY)
+            .map_err(|e| format!("Не удалось извлечь C# Agent: {e}"))?;
+    }
+
+    let mut child = Command::new(&agent_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|e| format!("Не удалось запустить C# Agent: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(prompt.as_bytes())
+            .map_err(|e| format!("Не удалось передать запрос C# Agent: {e}"))?;
+    }
+
+    let output = child.wait_with_output()
+        .map_err(|e| format!("Не удалось получить ответ C# Agent: {e}"))?;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if error.is_empty() {
+            format!("C# Agent завершился с кодом {}", output.status)
+        } else {
+            error
+        });
+    }
+
+    let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if answer.is_empty() {
+        Err("C# Agent вернул пустой ответ".into())
+    } else {
+        Ok(answer)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_csharp_agent(_prompt: &str) -> Result<String, String> {
+    Err("C# NativeAOT Agent включён только в сборку Windows.".into())
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum View {
@@ -121,7 +176,7 @@ impl MinuxIde {
 
     fn draw_chat(&mut self, ui: &mut egui::Ui) {
         ui.heading("MINUX Agent");
-        ui.label("Локальный интерфейс агента · провайдер пока не подключён");
+        ui.label("C# NativeAOT Agent · AI-провайдер пока не подключён");
         ui.separator();
         egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
             for (user, message) in &self.chat_messages {
@@ -143,10 +198,9 @@ impl MinuxIde {
             if send && !self.chat_input.trim().is_empty() {
                 let prompt = self.chat_input.trim().to_string();
                 self.chat_messages.push((true, prompt.clone()));
-                self.chat_messages.push((false, format!(
-                    "Это заглушка агента. Сообщение принято: «{}». Для реальных ответов нужно подключить API-провайдер и обработчик инструментов.",
-                    prompt
-                )));
+                let answer = run_csharp_agent(&prompt)
+                    .unwrap_or_else(|error| format!("Ошибка C# Agent: {error}"));
+                self.chat_messages.push((false, answer));
                 self.chat_input.clear();
             }
         });
@@ -284,7 +338,7 @@ impl eframe::App for MinuxIde {
                 ui.label("Ядро интерфейса: Rust + egui");
                 ui.label(format!("C++ Native Engine: v{}", unsafe { minux_engine_version() }));
                 ui.label(format!("C# Agent NativeAOT: v{}", agent_version()));
-                ui.label("C++ и C# собираются как статические библиотеки и линкуются в исполняемый файл.");
+                ui.label("C++ встроен статически; C# NativeAOT-агент встроен в этот EXE и извлекается при отправке сообщения.");
             }
         });
     }
