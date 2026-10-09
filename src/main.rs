@@ -1,83 +1,95 @@
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
+mod ai;
+mod workspace;
+
 use eframe::egui;
 use egui::{Color32, RichText, Stroke};
+use serde_json::{json, Value};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 
 unsafe extern "C" {
     fn minux_engine_version() -> u32;
 }
 
-use std::{
-    collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
-};
-
 #[cfg(target_os = "windows")]
 const CSHARP_AGENT_BINARY: &[u8] = include_bytes!(env!("MINUX_AGENT_EXE_PATH"));
 
 #[cfg(target_os = "windows")]
-fn agent_version() -> u32 {
-    1
-}
+fn agent_version() -> u32 { 1 }
 
 #[cfg(not(target_os = "windows"))]
-fn agent_version() -> u32 {
-    0
-}
+fn agent_version() -> u32 { 0 }
 
 #[cfg(target_os = "windows")]
-fn run_csharp_agent(prompt: &str) -> Result<String, String> {
-    use std::{
-        io::Write,
-        os::windows::process::CommandExt,
-        process::{Command, Stdio},
-    };
+fn csharp_agent_size() -> usize { CSHARP_AGENT_BINARY.len() }
+
+#[cfg(not(target_os = "windows"))]
+fn csharp_agent_size() -> usize { 0 }
+
+#[cfg(target_os = "windows")]
+fn run_csharp_agent(command: &str) -> Result<String, String> {
+    use std::{os::windows::process::CommandExt, process::Command};
 
     let agent_path = std::env::temp_dir().join(format!(
         "MINUXAgent-{}.exe",
         env!("MINUX_AGENT_FINGERPRINT")
     ));
-
     if !agent_path.is_file() {
         fs::write(&agent_path, CSHARP_AGENT_BINARY)
-            .map_err(|e| format!("Не удалось извлечь C# Agent: {e}"))?;
+            .map_err(|e| format!("Не удалось извлечь C# NativeAOT модуль: {e}"))?;
     }
 
-    let mut child = Command::new(&agent_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let output = Command::new(&agent_path)
+        .arg(command)
         .creation_flags(0x08000000)
-        .spawn()
-        .map_err(|e| format!("Не удалось запустить C# Agent: {e}"))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(prompt.as_bytes())
-            .map_err(|e| format!("Не удалось передать запрос C# Agent: {e}"))?;
-    }
-
-    let output = child.wait_with_output()
-        .map_err(|e| format!("Не удалось получить ответ C# Agent: {e}"))?;
+        .output()
+        .map_err(|e| format!("Не удалось запустить C# NativeAOT модуль: {e}"))?;
 
     if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(if error.is_empty() {
-            format!("C# Agent завершился с кодом {}", output.status)
+            format!("C# модуль завершился с кодом {}", output.status)
         } else {
             error
         });
     }
 
-    let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if answer.is_empty() {
-        Err("C# Agent вернул пустой ответ".into())
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if result.is_empty() {
+        Err("C# NativeAOT модуль вернул пустой ответ.".into())
     } else {
-        Ok(answer)
+        Ok(result)
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn run_csharp_agent(_prompt: &str) -> Result<String, String> {
-    Err("C# NativeAOT Agent включён только в сборку Windows.".into())
+fn run_csharp_agent(_command: &str) -> Result<String, String> {
+    Err("C# NativeAOT модуль проверки доступен в сборке Windows.".into())
+}
+
+#[derive(Clone)]
+struct ChatEntry {
+    user: bool,
+    content: String,
+    reasoning: Option<String>,
+}
+
+enum AiEvent {
+    AgentFinished(Result<ai::AgentResponse, String>),
+    ModelsFinished(Result<Vec<String>, String>),
+    CSharpChecked(Result<String, String>),
 }
 
 const BG: Color32 = Color32::from_rgb(18, 20, 26);
@@ -112,19 +124,48 @@ struct MinuxIde {
     show_output: bool,
     search_query: String,
     command_query: String,
+    search_results: Vec<PathBuf>,
     chat_input: String,
-    chat_messages: Vec<(bool, String)>,
+    chat_messages: Vec<ChatEntry>,
+    chat_history: Vec<Value>,
+    ai_pending: bool,
+    models_loading: bool,
+    module_check_pending: bool,
+    available_models: Vec<String>,
+    ai_tx: Sender<AiEvent>,
+    ai_rx: Receiver<AiEvent>,
     status: String,
     api_key: String,
     model: String,
+    thinking_enabled: bool,
+    max_tokens: u32,
     icons: HashMap<&'static str, egui::TextureHandle>,
     icons_loaded: bool,
     code_theme: egui_extras::syntax_highlighting::CodeTheme,
+    tree_nodes: Vec<workspace::FileNode>,
+    all_files: Vec<PathBuf>,
+    visible_tree: Vec<workspace::TreeRow>,
+    expanded_dirs: HashSet<PathBuf>,
+    tree_rx: Option<Receiver<workspace::WorkspaceIndex>>,
+    tree_cancel: Option<Arc<AtomicBool>>,
+    tree_loading: bool,
+    tree_truncated: bool,
 }
 
 impl Default for MinuxIde {
     fn default() -> Self {
         let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let settings = ai::load_settings();
+        let (ai_tx, ai_rx) = mpsc::channel();
+        let (tree_tx, tree_rx) = mpsc::channel();
+        let tree_cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = Arc::clone(&tree_cancel);
+        let initial_root = root.clone();
+        thread::spawn(move || {
+            let index = workspace::scan_workspace(initial_root, cancel_for_worker);
+            let _ = tree_tx.send(index);
+        });
+
         Self {
             root,
             selected_file: None,
@@ -136,14 +177,36 @@ impl Default for MinuxIde {
             show_output: false,
             search_query: String::new(),
             command_query: String::new(),
+            search_results: Vec::new(),
             chat_input: String::new(),
-            chat_messages: vec![(false, "Я MINUX Agent. Интерфейс агента готов, но провайдер AI пока не подключён. Сейчас я могу подтвердить получение запроса.".into())],
-            status: "Готово".into(),
-            api_key: String::new(),
-            model: "Не подключена".into(),
+            chat_messages: vec![ChatEntry {
+                user: false,
+                content: "MINUX Agent готов. Укажи Hugging Face token в настройках, выбери модель и отправь запрос. Агент может читать и изменять файлы открытого проекта.".into(),
+                reasoning: None,
+            }],
+            chat_history: Vec::new(),
+            ai_pending: false,
+            models_loading: false,
+            module_check_pending: false,
+            available_models: Vec::new(),
+            ai_tx,
+            ai_rx,
+            status: "Индексирование рабочей папки…".into(),
+            api_key: settings.token,
+            model: settings.model,
+            thinking_enabled: settings.thinking_enabled,
+            max_tokens: settings.max_tokens,
             icons: HashMap::new(),
             icons_loaded: false,
             code_theme: egui_extras::syntax_highlighting::CodeTheme::dark(13.5),
+            tree_nodes: Vec::new(),
+            all_files: Vec::new(),
+            visible_tree: Vec::new(),
+            expanded_dirs: HashSet::new(),
+            tree_rx: Some(tree_rx),
+            tree_cancel: Some(tree_cancel),
+            tree_loading: true,
+            tree_truncated: false,
         }
     }
 }
@@ -180,7 +243,7 @@ fn apply_theme(ctx: &egui::Context) {
 }
 
 fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::TextureHandle> {
-    let assets: [(&'static str, &'static str); 24] = [
+    let assets: [(&'static str, &'static str); 30] = [
         ("file-code", include_str!("../assets/icons/file-code.svg")),
         ("file-text", include_str!("../assets/icons/file-text.svg")),
         ("folder", include_str!("../assets/icons/folder.svg")),
@@ -205,6 +268,12 @@ fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::Textur
         ("lang-json", include_str!("../assets/icons/lang-json.svg")),
         ("lang-make", include_str!("../assets/icons/lang-make.svg")),
         ("lang-css3", include_str!("../assets/icons/lang-css3.svg")),
+        ("send", include_str!("../assets/icons/send.svg")),
+        ("key-round", include_str!("../assets/icons/key-round.svg")),
+        ("brain", include_str!("../assets/icons/brain.svg")),
+        ("cloud-download", include_str!("../assets/icons/cloud-download.svg")),
+        ("folder-plus", include_str!("../assets/icons/folder-plus.svg")),
+        ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ];
     let mut icons = HashMap::with_capacity(assets.len() + 1);
     for (name, svg) in assets.into_iter().chain([("lang-yaml", include_str!("../assets/icons/lang-yaml.svg"))]) {
@@ -274,11 +343,58 @@ impl MinuxIde {
             self.editor_text.clear();
             self.dirty = false;
             self.settings_open = false;
-            self.status = "Рабочая папка открыта".into();
+            self.status = "Сканирование проекта…".into();
+            self.start_workspace_scan();
         }
     }
 
+    fn start_workspace_scan(&mut self) {
+        if let Some(cancel) = self.tree_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.tree_nodes.clear();
+        self.all_files.clear();
+        self.visible_tree.clear();
+        self.expanded_dirs.clear();
+        self.tree_truncated = false;
+        self.tree_loading = true;
+
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = Arc::clone(&cancel);
+        let root = self.root.clone();
+        self.tree_rx = Some(rx);
+        self.tree_cancel = Some(cancel);
+        thread::spawn(move || {
+            let index = workspace::scan_workspace(root, cancel_for_worker);
+            let _ = tx.send(index);
+        });
+    }
+
+    fn rebuild_visible_tree(&mut self) {
+        self.visible_tree = workspace::flatten_visible(&self.tree_nodes, &self.expanded_dirs);
+    }
+
+    fn refresh_search_results(&mut self) {
+        let needle = self.search_query.trim().to_lowercase();
+        if needle.is_empty() {
+            self.search_results.clear();
+            return;
+        }
+        self.search_results = self.all_files.iter()
+            .filter(|path| path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.to_lowercase().contains(&needle)))
+            .take(500)
+            .cloned()
+            .collect();
+    }
+
     fn open_file(&mut self, path: PathBuf) {
+        if fs::metadata(&path).map(|meta| meta.len() > 4 * 1024 * 1024).unwrap_or(false) {
+            self.status = "Файл больше 4 MiB. Открытие остановлено, чтобы интерфейс не зависал.".into();
+            return;
+        }
         match fs::read_to_string(&path) {
             Ok(text) => {
                 self.editor_text = text;
@@ -289,6 +405,98 @@ impl MinuxIde {
             }
             Err(e) => self.status = format!("Не удалось открыть файл: {e}"),
         }
+    }
+
+    fn current_ai_settings(&self) -> ai::AiSettings {
+        ai::AiSettings {
+            token: self.api_key.clone(),
+            model: self.model.clone(),
+            thinking_enabled: self.thinking_enabled,
+            max_tokens: self.max_tokens,
+        }
+    }
+
+    fn save_ai_settings(&mut self) {
+        match ai::save_settings(&self.current_ai_settings()) {
+            Ok(()) => self.status = "Настройки Hugging Face сохранены локально".into(),
+            Err(error) => self.status = error,
+        }
+    }
+
+    fn fetch_huggingface_models(&mut self) {
+        if self.api_key.trim().is_empty() {
+            self.status = "Сначала введи Hugging Face Access Token".into();
+            self.settings_open = true;
+            return;
+        }
+        let token = self.api_key.clone();
+        let tx = self.ai_tx.clone();
+        self.models_loading = true;
+        self.status = "Загружаю доступные модели Hugging Face…".into();
+        thread::spawn(move || {
+            let result = ai::fetch_models(&token);
+            let _ = tx.send(AiEvent::ModelsFinished(result));
+        });
+    }
+
+    fn check_csharp_module(&mut self) {
+        if self.module_check_pending {
+            return;
+        }
+        self.module_check_pending = true;
+        self.status = "Проверяю встроенный C# NativeAOT модуль…".into();
+        let tx = self.ai_tx.clone();
+        thread::spawn(move || {
+            let result = run_csharp_agent("--health");
+            let _ = tx.send(AiEvent::CSharpChecked(result));
+        });
+    }
+
+    fn send_agent_prompt(&mut self, prompt: String) {
+        if self.ai_pending || prompt.trim().is_empty() {
+            return;
+        }
+        self.chat_messages.push(ChatEntry {
+            user: true,
+            content: prompt.clone(),
+            reasoning: None,
+        });
+
+        if self.api_key.trim().is_empty() {
+            self.chat_messages.push(ChatEntry {
+                user: false,
+                content: "Сначала открой Настройки, добавь Hugging Face Access Token и сохрани его.".into(),
+                reasoning: None,
+            });
+            self.settings_open = true;
+            self.status = "Не задан Hugging Face token".into();
+            return;
+        }
+        if self.model.trim().is_empty() {
+            self.chat_messages.push(ChatEntry {
+                user: false,
+                content: "Выбери модель Hugging Face или укажи её ID вручную.".into(),
+                reasoning: None,
+            });
+            self.settings_open = true;
+            return;
+        }
+
+        self.chat_history.push(json!({"role":"user","content":prompt}));
+        let settings = self.current_ai_settings();
+        if let Err(error) = ai::save_settings(&settings) {
+            self.status = format!("Запрос запущен, но настройки не сохранены: {error}");
+        } else {
+            self.status = format!("Запрос к {}…", settings.model);
+        }
+        let history = self.chat_history.clone();
+        let root = self.root.clone();
+        let tx = self.ai_tx.clone();
+        self.ai_pending = true;
+        thread::spawn(move || {
+            let result = ai::run_agent(settings, history, root);
+            let _ = tx.send(AiEvent::AgentFinished(result));
+        });
     }
 
     fn save_file(&mut self) {
@@ -305,49 +513,69 @@ impl MinuxIde {
         }
     }
 
-    fn draw_tree(&mut self, ui: &mut egui::Ui, dir: &Path, depth: usize) {
-        if depth > 3 {
-            return;
+    fn draw_tree(&mut self, ui: &mut egui::Ui) {
+        if self.tree_loading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Индексирую файлы в фоне…").size(11.0).color(MUTED));
+            });
         }
-        let Ok(entries) = fs::read_dir(dir) else {
-            ui.label(RichText::new("Не удалось прочитать папку").color(MUTED).size(11.0));
-            return;
-        };
+        if self.tree_truncated {
+            ui.label(RichText::new("Показана ограниченная часть большого проекта.").size(10.0).color(ORANGE));
+        }
+        let total_rows = self.visible_tree.len();
+        let icons = &self.icons;
+        let expanded_dirs = &self.expanded_dirs;
+        let selected_file = self.selected_file.as_ref();
+        let mut toggle_path: Option<PathBuf> = None;
+        let mut selected_path: Option<PathBuf> = None;
 
-        let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-        entries.sort_by_key(|entry| (!entry.path().is_dir(), entry.file_name()));
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show_rows(ui, 23.0, total_rows, |ui, row_range| {
+                let rows = self.visible_tree[row_range].to_vec();
+                for row in rows {
+                    ui.horizontal(|ui| {
+                        ui.add_space((row.depth as f32 * 13.0) + 2.0);
+                        if row.is_dir {
+                            let expanded = expanded_dirs.contains(&row.path);
+                            let arrow = if expanded { "▾" } else { "›" };
+                            if ui.add_sized([13.0, 20.0], egui::Button::new(RichText::new(arrow).size(12.0).color(MUTED)).frame(false)).clicked() {
+                                toggle_path = Some(row.path.clone());
+                            }
+                            draw_icon(ui, icons, if expanded { "folder-open" } else { "folder" }, 15.0, Color32::WHITE);
+                        } else {
+                            ui.add_space(13.0);
+                            draw_icon(ui, icons, file_icon_key_for_path(&row.path), 15.0, Color32::WHITE);
+                        }
+                        let selected = selected_file == Some(&row.path);
+                        let label = ui.add_sized(
+                            [ui.available_width().max(30.0), 21.0],
+                            egui::Label::new(
+                                RichText::new(&row.name)
+                                    .size(11.5)
+                                    .color(if selected { TEXT } else { MUTED }),
+                            ).sense(egui::Sense::click()),
+                        );
+                        if label.clicked() {
+                            if row.is_dir {
+                                toggle_path = Some(row.path.clone());
+                            } else {
+                                selected_path = Some(row.path.clone());
+                            }
+                        }
+                    });
+                }
+            });
 
-        for entry in entries {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-            if path.file_name().and_then(|s| s.to_str()).is_some_and(|s| {
-                s.starts_with('.') || matches!(s, "target" | "node_modules" | "bin" | "obj")
-            }) {
-                continue;
+        if let Some(path) = toggle_path {
+            if !self.expanded_dirs.remove(&path) {
+                self.expanded_dirs.insert(path);
             }
-
-            if path.is_dir() {
-                let response = egui::CollapsingHeader::new(
-                    RichText::new(format!("      {name}")).size(12.0).color(TEXT),
-                )
-                .id_salt(path.to_string_lossy().to_string())
-                .default_open(depth == 0)
-                .show(ui, |ui| self.draw_tree(ui, &path, depth + 1));
-                let icon_rect = egui::Rect::from_center_size(
-                    egui::pos2(response.header_response.rect.left() + 27.0, response.header_response.rect.center().y),
-                    egui::vec2(14.0, 14.0),
-                );
-                paint_icon_at(ui, &self.icons, "folder", icon_rect, Color32::WHITE);
-            } else {
-                let selected = self.selected_file.as_ref() == Some(&path);
-                ui.horizontal(|ui| {
-                    ui.add_space(7.0);
-                    draw_icon(ui, &self.icons, file_icon_key_for_path(&path), 16.0, Color32::WHITE);
-                    if ui.selectable_label(selected, RichText::new(name.clone()).size(12.0).color(if selected { TEXT } else { MUTED })).clicked() {
-                        self.open_file(path.clone());
-                    }
-                });
-            }
+            self.rebuild_visible_tree();
+        }
+        if let Some(path) = selected_path {
+            self.open_file(path);
         }
     }
 
@@ -358,8 +586,8 @@ impl MinuxIde {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("ПРОВОДНИК").size(10.0).strong().color(MUTED));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("↻").on_hover_text("Обновить дерево").clicked() {
-                            self.status = "Дерево файлов обновлено".into();
+                        if toolbar_icon_button(ui, &self.icons, "refresh-cw", false, "Пересканировать проект").clicked() {
+                            self.start_workspace_scan();
                         }
                     });
                 });
@@ -369,10 +597,7 @@ impl MinuxIde {
                     ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).strong().size(12.0));
                 });
                 ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let root = self.root.clone();
-                    self.draw_tree(ui, &root, 0);
-                });
+                self.draw_tree(ui);
             }
             SidebarView::Search => {
                 ui.horizontal(|ui| {
@@ -380,25 +605,43 @@ impl MinuxIde {
                     ui.label(RichText::new("ПОИСК ФАЙЛОВ").size(10.0).strong().color(MUTED));
                 });
                 ui.add_space(8.0);
-                ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Имя файла...").desired_width(f32::INFINITY));
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("Имя файла…")
+                        .desired_width(f32::INFINITY),
+                );
+                if response.changed() {
+                    self.refresh_search_results();
+                }
                 ui.add_space(8.0);
                 if self.search_query.trim().is_empty() {
-                    ui.label(RichText::new("Введите часть имени файла, чтобы найти его в проекте.").size(11.0).color(MUTED));
+                    ui.label(RichText::new("Поиск по индексу проекта — без повторного обхода диска.").size(11.0).color(MUTED));
                 } else {
-                    let mut matches = Vec::new();
-                    collect_search_matches(&self.root, &self.search_query, 0, &mut matches);
-                    ui.label(RichText::new(format!("РЕЗУЛЬТАТЫ · {}", matches.len())).size(10.0).strong().color(MUTED));
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for path in matches {
-                            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            ui.horizontal(|ui| {
-                                draw_icon(ui, &self.icons, file_icon_key_for_path(&path), 16.0, Color32::WHITE);
-                                if ui.selectable_label(false, RichText::new(name).size(12.0)).clicked() {
-                                    self.open_file(path.clone());
-                                }
-                            });
-                        }
-                    });
+                    let total = self.search_results.len();
+                    ui.label(RichText::new(format!("РЕЗУЛЬТАТЫ · {total}{}", if total == 500 { "+" } else { "" })).size(10.0).strong().color(MUTED));
+                    let icons = &self.icons;
+                    let mut selected_path: Option<PathBuf> = None;
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show_rows(ui, 23.0, total, |ui, row_range| {
+                            let rows = self.search_results[row_range].to_vec();
+                            for path in rows {
+                                let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                                ui.horizontal(|ui| {
+                                    draw_icon(ui, icons, file_icon_key_for_path(&path), 15.0, Color32::WHITE);
+                                    let response = ui.add_sized(
+                                        [ui.available_width().max(30.0), 21.0],
+                                        egui::Label::new(RichText::new(name).size(11.5).color(TEXT)).sense(egui::Sense::click()),
+                                    );
+                                    if response.clicked() {
+                                        selected_path = Some(path.clone());
+                                    }
+                                });
+                            }
+                        });
+                    if let Some(path) = selected_path {
+                        self.open_file(path);
+                    }
                 }
             }
             SidebarView::Extensions => {
@@ -440,87 +683,184 @@ impl MinuxIde {
     }
 
     fn draw_ai_sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("MINUX AGENT").strong().size(12.0));
+            draw_icon(ui, &self.icons, "bot", 19.0, ACCENT);
+            ui.label(RichText::new("MINUX Agent").strong().size(13.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("×").on_hover_text("Закрыть AI-панель").clicked() {
                     self.show_ai = false;
                 }
             });
         });
+        let connected = !self.api_key.trim().is_empty() && !self.model.trim().is_empty();
         ui.horizontal(|ui| {
-            ui.label(RichText::new("●").color(ORANGE).size(10.0));
-            ui.label(RichText::new("Провайдер не подключён").size(10.0).color(MUTED));
+            ui.label(RichText::new("●").color(if connected { GREEN } else { ORANGE }).size(10.0));
+            ui.label(RichText::new(if connected { self.model.as_str() } else { "Добавь Hugging Face token в настройках" }).size(10.0).color(MUTED));
         });
         ui.separator();
 
-        let scroll_height = (ui.available_height() - 100.0).max(100.0);
+        let scroll_height = (ui.available_height() - 135.0).max(100.0);
         egui::ScrollArea::vertical()
             .max_height(scroll_height)
             .stick_to_bottom(true)
             .show(ui, |ui| {
-                for (user, message) in &self.chat_messages {
-                    ui.add_space(5.0);
-                    ui.label(RichText::new(if *user { "ВЫ" } else { "AGENT" }).size(9.0).strong().color(if *user { ACCENT } else { GREEN }));
-                    ui.add(egui::Label::new(RichText::new(message).size(12.0).color(TEXT)).wrap());
+                for entry in &self.chat_messages {
+                    ui.add_space(7.0);
+                    ui.label(RichText::new(if entry.user { "ВЫ" } else { "MINUX AGENT" }).size(9.0).strong().color(if entry.user { ACCENT } else { GREEN }));
+                    ui.add(egui::Label::new(RichText::new(&entry.content).size(12.0).color(TEXT)).wrap());
+                    if let Some(reasoning) = &entry.reasoning {
+                        ui.add_space(3.0);
+                        egui::CollapsingHeader::new(RichText::new("Размышления модели").size(10.0).color(MUTED))
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                ui.add(egui::Label::new(RichText::new(reasoning).size(11.0).color(MUTED)).wrap());
+                            });
+                    }
                     ui.add_space(8.0);
                     ui.separator();
                 }
+                if self.ai_pending {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Модель генерирует ответ…").size(11.0).color(MUTED));
+                    });
+                }
             });
 
-        ui.add_space(6.0);
+        ui.add_space(5.0);
+        if !connected && ui.button("Настроить Hugging Face").clicked() {
+            self.settings_open = true;
+        }
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(if self.thinking_enabled { "Thinking: вкл." } else { "Thinking: выкл." }).size(10.0).color(MUTED));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки модели").clicked() {
+                    self.settings_open = true;
+                }
+            });
+        });
+
         let response = ui.add_sized(
-            [ui.available_width(), 38.0],
-            egui::TextEdit::singleline(&mut self.chat_input).hint_text("Спросите о проекте..."),
+            [ui.available_width(), 68.0],
+            egui::TextEdit::multiline(&mut self.chat_input)
+                .desired_rows(3)
+                .hint_text("Опиши задачу, попроси изменить код или создать файлы…"),
         );
         ui.add_space(5.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Enter — отправить").size(9.0).color(MUTED));
+            ui.label(RichText::new("Ctrl+Enter для отправки").size(9.0).color(MUTED));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let send_clicked = ui.button("Отправить").clicked();
-                let send_enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if (send_clicked || send_enter) && !self.chat_input.trim().is_empty() {
-                    let prompt = self.chat_input.trim().to_string();
-                    self.chat_messages.push((true, prompt.clone()));
-                    let answer = run_csharp_agent(&prompt)
-                        .unwrap_or_else(|error| format!("Ошибка C# Agent: {error}"));
-                    self.chat_messages.push((false, answer));
-                    self.chat_input.clear();
+                let send_clicked = toolbar_icon_button(ui, &self.icons, "send", false, if self.ai_pending { "Запрос выполняется" } else { "Отправить сообщение" }).clicked();
+                let send_enter = response.lost_focus()
+                    && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
+                if (send_clicked || send_enter) && !self.chat_input.trim().is_empty() && !self.ai_pending {
+                    let prompt = std::mem::take(&mut self.chat_input);
+                    self.send_agent_prompt(prompt);
                 }
             });
         });
     }
 
     fn draw_settings(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(20.0);
-        ui.label(RichText::new("Настройки").size(26.0).strong().color(TEXT));
-        ui.label(RichText::new("Внешний вид, рабочая среда и подключение AI.").size(12.0).color(MUTED));
-        ui.add_space(20.0);
+        ui.add_space(14.0);
+        ui.label(RichText::new("Настройки").size(25.0).strong().color(TEXT));
+        ui.label(RichText::new("Подключение модели и рабочая среда MINUX IDE.").size(12.0).color(MUTED));
+        ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new("AI-ПРОВАЙДЕР").size(10.0).strong().color(ACCENT));
+        ui.label(RichText::new("HUGGING FACE INFERENCE").size(10.0).strong().color(ACCENT));
         ui.add_space(8.0);
-        ui.label(RichText::new("Название модели или провайдера").size(12.0).color(TEXT));
-        ui.add_sized([360.0, 34.0], egui::TextEdit::singleline(&mut self.model).hint_text("Например, Groq"));
-        ui.add_space(10.0);
-        ui.label(RichText::new("API-ключ").size(12.0).color(TEXT));
-        ui.add_sized([360.0, 34.0], egui::TextEdit::singleline(&mut self.api_key).password(true).hint_text("Введите API-ключ"));
-        ui.add_space(6.0);
-        ui.label(RichText::new("Ключ пока не сохраняется, запросы к API не выполняются.").size(11.0).color(MUTED));
-        ui.add_space(24.0);
-        ui.separator();
+        ui.horizontal(|ui| {
+            draw_icon(ui, &self.icons, "key-round", 16.0, ACCENT);
+            ui.label(RichText::new("Access Token").size(12.0).color(TEXT));
+        });
+        ui.add_sized(
+            [460.0, 34.0],
+            egui::TextEdit::singleline(&mut self.api_key)
+                .password(true)
+                .hint_text("hf_…"),
+        );
+        ui.add_space(5.0);
+        ui.label(RichText::new("Токен хранится локально в пользовательском settings.json без шифрования. Не публикуй этот файл.").size(10.0).color(ORANGE));
         ui.add_space(12.0);
+
+        ui.label(RichText::new("Модель").size(12.0).color(TEXT));
+        let model_options: Vec<String> = if self.available_models.is_empty() {
+            ai::suggested_models().iter().map(|item| (*item).to_owned()).collect()
+        } else {
+            self.available_models.clone()
+        };
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [310.0, 34.0],
+                egui::TextEdit::singleline(&mut self.model)
+                    .hint_text("Организация/имя-модели"),
+            );
+            egui::ComboBox::from_id_salt("hf_model_selector")
+                .selected_text("Модели ▾")
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for model in &model_options {
+                        ui.selectable_value(&mut self.model, model.clone(), model);
+                    }
+                });
+        });
+        ui.add_space(5.0);
+        ui.horizontal(|ui| {
+            draw_icon(ui, &self.icons, "cloud-download", 16.0, ACCENT);
+            if ui.add_enabled(!self.models_loading, egui::Button::new(if self.models_loading { "Загрузка…" } else { "Загрузить доступные модели" })).clicked() {
+                self.fetch_huggingface_models();
+            }
+            ui.label(RichText::new(format!("{} моделей", self.available_models.len())).size(10.0).color(MUTED));
+        });
+        ui.add_space(11.0);
+
+        ui.horizontal(|ui| {
+            draw_icon(ui, &self.icons, "brain", 16.0, ACCENT);
+            ui.label(RichText::new("Генерация").size(12.0).color(TEXT));
+        });
+        ui.checkbox(&mut self.thinking_enabled, "Thinking / extended reasoning (если поддерживается моделью)");
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Максимум токенов ответа").size(11.0).color(MUTED));
+            egui::ComboBox::from_id_salt("hf_max_tokens")
+                .selected_text(self.max_tokens.to_string())
+                .show_ui(ui, |ui| {
+                    for size in [512u32, 1024, 2048, 4096, 8192] {
+                        ui.selectable_value(&mut self.max_tokens, size, size.to_string());
+                    }
+                });
+        });
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            if ui.button("Сохранить настройки").clicked() {
+                self.save_ai_settings();
+            }
+            if ui.button("Проверить токен и модели").clicked() {
+                self.fetch_huggingface_models();
+            }
+            if ui.add_enabled(!self.module_check_pending, egui::Button::new("Проверить C# модуль")).clicked() {
+                self.check_csharp_module();
+            }
+            if ui.button("Открыть AI-панель").clicked() {
+                self.show_ai = true;
+                self.settings_open = false;
+            }
+        });
+        ui.add_space(8.0);
+        ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
+        ui.add_space(17.0);
+        ui.separator();
+        ui.add_space(10.0);
         ui.label(RichText::new("КОМПОНЕНТЫ").size(10.0).strong().color(ACCENT));
         settings_row(ui, "UI / Core", "Rust · egui", GREEN);
-        settings_row(ui, "Syntax highlighting", "egui_extras + Syntect", GREEN);
-        settings_row(ui, "SVG rendering", "resvg", GREEN);
-        settings_row(ui, "Icon assets", "Lucide + Devicon", GREEN);
+        settings_row(ui, "Syntax highlighting", "Syntect", GREEN);
+        settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native Engine", &format!("C++ · v{}", unsafe { minux_engine_version() }), GREEN);
-        settings_row(ui, "Agent", &format!("C# NativeAOT · v{}", agent_version()), GREEN);
+        settings_row(ui, "C# NativeAOT agent", &format!("v{} · {} KiB embedded", agent_version(), csharp_agent_size() / 1024), GREEN);
         ui.add_space(8.0);
-        ui.label(RichText::new("Языки: Rust, TS/TSX, JS/JSX, Python, C/C++, C#, Shell, XML/XSLT, Makefile, HTML, CSS, JSON, YAML.").size(11.0).color(MUTED));
-        ui.add_space(16.0);
+        ui.label(RichText::new("Файловая структура сканируется в отдельном потоке; отображение дерева виртуализировано.").size(11.0).color(MUTED));
+        ui.add_space(10.0);
         if ui.button("← Вернуться в редактор").clicked() {
             self.settings_open = false;
         }
@@ -594,13 +934,22 @@ impl MinuxIde {
             let code_theme = self.code_theme.clone();
             let syntax = syntax_selector_for_path(&path).to_string();
             let mut layouter = move |ui: &egui::Ui, source: &str, wrap_width: f32| {
-                let mut job = egui_extras::syntax_highlighting::highlight(
-                    ui.ctx(),
-                    ui.style(),
-                    &code_theme,
-                    source,
-                    &syntax,
-                );
+                let mut job = if source.len() > 500_000 {
+                    egui::text::LayoutJob::simple(
+                        source.to_owned(),
+                        egui::FontId::monospace(13.5),
+                        TEXT,
+                        wrap_width,
+                    )
+                } else {
+                    egui_extras::syntax_highlighting::highlight(
+                        ui.ctx(),
+                        ui.style(),
+                        &code_theme,
+                        source,
+                        &syntax,
+                    )
+                };
                 job.wrap.max_width = wrap_width;
                 ui.fonts(|fonts| fonts.layout_job(job))
             };
@@ -646,6 +995,81 @@ impl eframe::App for MinuxIde {
             self.icons = load_icon_textures(ctx);
             self.icons_loaded = true;
         }
+
+        let scan_result = self.tree_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(index) = scan_result {
+            self.tree_rx = None;
+            self.tree_cancel = None;
+            self.tree_loading = false;
+            self.tree_nodes = index.nodes;
+            self.all_files = index.all_files;
+            self.tree_truncated = index.truncated;
+            self.rebuild_visible_tree();
+            self.refresh_search_results();
+            self.status = if self.tree_truncated {
+                format!("Индекс готов: {} файлов; достигнут лимит сканирования", self.all_files.len())
+            } else {
+                format!("Индекс готов: {} файлов", self.all_files.len())
+            };
+        }
+
+        let mut events = Vec::new();
+        while let Ok(event) = self.ai_rx.try_recv() {
+            events.push(event);
+        }
+        for event in events {
+            match event {
+                AiEvent::AgentFinished(result) => {
+                    self.ai_pending = false;
+                    match result {
+                        Ok(answer) => {
+                            if answer.workspace_changed {
+                                self.start_workspace_scan();
+                            }
+                            self.ai_history = answer.history;
+                            self.chat_messages.push(ChatEntry {
+                                user: false,
+                                content: answer.content,
+                                reasoning: answer.reasoning,
+                            });
+                            self.status = "Ответ получен".into();
+                        }
+                        Err(error) => {
+                            self.ai_history.push(json!({"role":"assistant","content":error.clone()}));
+                            self.chat_messages.push(ChatEntry {
+                                user: false,
+                                content: error.clone(),
+                                reasoning: None,
+                            });
+                            self.status = error;
+                        }
+                    }
+                }
+                AiEvent::ModelsFinished(result) => {
+                    self.models_loading = false;
+                    match result {
+                        Ok(models) => {
+                            let count = models.len();
+                            self.available_models = models;
+                            self.status = format!("Hugging Face: загружено моделей — {count}");
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+                AiEvent::CSharpChecked(result) => {
+                    self.module_check_pending = false;
+                    self.status = match result {
+                        Ok(message) => format!("C# модуль: {message}"),
+                        Err(error) => error,
+                    };
+                }
+            }
+        }
+
+        if self.tree_loading || self.ai_pending || self.models_loading || self.module_check_pending {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
             self.save_file();
         }
@@ -677,6 +1101,7 @@ impl eframe::App for MinuxIde {
                     );
                     if command_search.changed() {
                         self.search_query = self.command_query.clone();
+                        self.refresh_search_results();
                         if !self.command_query.trim().is_empty() {
                             self.sidebar_view = SidebarView::Search;
                             self.settings_open = false;
@@ -888,7 +1313,9 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" => "C++",
         "cs" => "C#",
         "sh" | "bash" | "zsh" | "fish" => "sh",
-        "xml" | "xsl" | "xslt" | "xsd" | "dtd" => "XML",
+        "xml" | "xsd" | "dtd" => "XML",
+        "xsl" => "xsl",
+        "xslt" => "xslt",
         "html" | "htm" => "HTML",
         "json" | "jsonc" => "JSON",
         "css" | "scss" | "sass" => "CSS",
@@ -956,27 +1383,6 @@ fn language_display_name(path: &Path) -> &'static str {
         "pl" | "pm" => "Perl",
         "ps1" | "psm1" => "PowerShell",
         _ => "Text",
-    }
-}
-
-fn collect_search_matches(root: &Path, query: &str, depth: usize, hits: &mut Vec<PathBuf>) {
-    if depth > 5 || hits.len() >= 80 {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(root) else { return; };
-    let needle = query.to_lowercase();
-    for entry in entries.filter_map(Result::ok) {
-        if hits.len() >= 80 { break; }
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') || matches!(name.as_str(), "target" | "node_modules" | "bin" | "obj") {
-            continue;
-        }
-        if path.is_dir() {
-            collect_search_matches(&path, query, depth + 1, hits);
-        } else if name.to_lowercase().contains(&needle) {
-            hits.push(path);
-        }
     }
 }
 

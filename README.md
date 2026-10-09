@@ -1,28 +1,60 @@
-# MINUX-IDE
+# MINUX IDE
 
-Native desktop IDE foundation built with Rust/egui, a C++ engine module, and a bundled C# NativeAOT agent.
+A native desktop IDE built around Rust/egui, with C++ and C# NativeAOT modules. The Windows Release build opens as a GUI application without a console window.
 
 ## Build
 
-Install Rust stable and the .NET 9 SDK, then run `cargo build --release`.
+Install Rust stable and the .NET 9 SDK, then run:
 
-The Windows x64 executable is published manually from GitHub Actions as the artifact `MINUX-IDE-Windows-x64`.
+```powershell
+cargo build --release --target x86_64-pc-windows-msvc
+```
 
-## Included libraries
+The GitHub Actions workflow is **manual-only**. Start it from the Actions page with **Run workflow**. The successful run publishes the `MINUX-IDE-Windows-x64` artifact.
 
-- **egui_extras + Syntect** — memoized grammar-based syntax highlighting using bundled Sublime Text syntax definitions.
-- **resvg** (through `egui_extras/svg`) — rasterizes bundled SVG icons into GPU textures.
-- **rfd** — native file and folder dialogs.
-- **cc** — builds the native C++ engine module.
+## Hugging Face AI agent
 
-## Languages and file icons
+1. Open MINUX IDE → Settings.
+2. Paste a Hugging Face Access Token with Inference Providers permission. Create/manage tokens at https://huggingface.co/settings/tokens.
+3. Load the available models, or type a model ID manually.
+4. Save settings, open the Agent panel and send a request.
 
-The editor selects syntax grammars based on the file extension. Included language mappings cover Rust, TypeScript/TSX, JavaScript/JSX, Python, C, C++, C#, Shell/Bash, XML/XSL/XSLT, Makefile, HTML, CSS, JSON, YAML, TOML, Markdown, SQL, Java, Go, Lua, PHP, Ruby, Swift, Kotlin, Perl, and PowerShell. Actual grammar coverage depends on the bundled Syntect syntax set.
+The client uses the OpenAI-compatible Hugging Face router at `https://router.huggingface.co/v1/chat/completions`. Network requests run on worker threads so the editor remains responsive. Available-model lookup also runs in the background.
 
-The file tree, editor tabs, activity rail, and tool buttons use bundled SVG textures. Language logos are from [Devicon](https://github.com/devicons/devicon) (MIT); UI glyphs are from [Lucide](https://github.com/lucide-icons/lucide) (ISC). Their upstream license texts are included in `assets/icons/DEVICON-LICENSE.txt` and `assets/icons/LUCIDE-LICENSE.txt`.
+The agent supports tool calls for listing the workspace, reading text files, creating directories and files, and editing files. It restricts paths to the currently opened workspace, refuses path traversal and symlink escapes, caps tool file reads/writes at 2 MiB, and does not delete files or execute shell commands. Tool calling requires a model/provider that supports function tools. The reasoning toggle sends the model's thinking flag where supported and displays returned reasoning in a collapsed section when the provider returns it.
 
-## Current limitations
+The token is stored in the local per-user `MINUX-IDE/settings.json` without encryption. On Windows this is under `%APPDATA%\MINUX-IDE\settings.json`; do not publish or share that file.
 
-- AI provider requests are not connected yet; the C# agent currently acknowledges prompts.
-- The output panel is a UI shell; a process terminal/build runner is not implemented.
-- Language support here means file association and syntax highlighting, not yet LSP diagnostics, completion, or refactoring.
+## Supported syntax highlighting
+
+The editor uses `egui_extras` + `Syntect` with bundled syntax definitions for:
+
+- Rust
+- TypeScript / TSX
+- JavaScript / JSX
+- Shell / Bash
+- XML, XSL and XSLT
+- Python
+- C and C++
+- C#
+- Makefile / GNU Make / CMake
+- HTML, CSS, JSON, YAML, TOML, Markdown, SQL, Java, Go, Lua, PHP, Ruby, Swift, Kotlin, Perl and PowerShell
+
+Grammar coverage depends on the definitions bundled with Syntect. Syntax highlighting is not a substitute for LSP diagnostics, code completion or refactoring; these are not implemented yet.
+
+## Responsiveness and assets
+
+- The workspace is indexed on a cancellable worker thread, with a 30,000-entry cap and ignored generated directories such as `target`, `node_modules`, `bin`, `obj` and `dist`.
+- The file explorer and search results use row virtualization; search queries the in-memory index instead of recursively scanning disk on every frame.
+- Files larger than 4 MiB are not opened in the text editor, and syntax highlighting switches to a lightweight layout for files over 500 KiB.
+- SVG icons are bundled locally and loaded once as textures. Lucide and Devicon license texts are included in `assets/icons/`.
+
+## Main libraries
+
+- `egui` / `eframe` — native desktop UI
+- `egui_extras` + `Syntect` — grammar-based syntax highlighting
+- `resvg` through `egui_extras/svg` — SVG icon rendering
+- `reqwest`, `serde`, `serde_json` — asynchronous-threaded Hugging Face API client and tool-call processing
+- `rfd` — native file/folder dialogs
+- `cc` — C++ engine compilation
+- .NET 9 NativeAOT — bundled C# module
