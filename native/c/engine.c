@@ -2,9 +2,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* MINUX native C core: model identifier validation and UI easing. */
+/* Small native core shared by editor search, animation and model-ID checks. */
 uint32_t minux_engine_version(void) {
-    return 2u;
+    return 3u;
 }
 
 int minux_model_id_is_valid(const uint8_t *data, size_t length) {
@@ -37,5 +37,70 @@ float minux_ease_out_cubic(float progress) {
     {
         const float inverse = 1.0f - progress;
         return 1.0f - inverse * inverse * inverse;
+    }
+}
+
+float minux_ease_in_out_cubic(float progress) {
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+    if (progress < 0.5f) return 4.0f * progress * progress * progress;
+    {
+        const float inverse = -2.0f * progress + 2.0f;
+        return 1.0f - (inverse * inverse * inverse) / 2.0f;
+    }
+}
+
+static unsigned char minux_ascii_lower(unsigned char value) {
+    if (value >= (unsigned char)'A' && value <= (unsigned char)'Z') {
+        return (unsigned char)(value + ((unsigned char)'a' - (unsigned char)'A'));
+    }
+    return value;
+}
+
+int32_t minux_search_score(const uint8_t *query, size_t query_len,
+                           const uint8_t *candidate, size_t candidate_len) {
+    if (query == NULL || candidate == NULL || query_len == 0u ||
+        query_len > 256u || candidate_len == 0u || candidate_len > 1024u ||
+        query_len > candidate_len) return -1;
+
+    int exact = query_len == candidate_len;
+    int prefix = 1;
+    for (size_t i = 0u; i < query_len; ++i) {
+        const unsigned char q = minux_ascii_lower((unsigned char)query[i]);
+        const unsigned char c = minux_ascii_lower((unsigned char)candidate[i]);
+        if (q != c) {
+            exact = 0;
+            prefix = 0;
+            break;
+        }
+    }
+    if (exact) return 1000;
+    if (prefix) return 800 - (int)(candidate_len - query_len);
+
+    for (size_t start = 1u; start + query_len <= candidate_len; ++start) {
+        size_t matched = 0u;
+        while (matched < query_len &&
+               minux_ascii_lower((unsigned char)query[matched]) ==
+               minux_ascii_lower((unsigned char)candidate[start + matched])) ++matched;
+        if (matched == query_len) {
+            return 600 - (int)(start * 5u) - (int)(candidate_len - query_len);
+        }
+    }
+
+    size_t matched = 0u;
+    size_t gaps = 0u;
+    size_t previous = 0u;
+    for (size_t i = 0u; i < candidate_len && matched < query_len; ++i) {
+        if (minux_ascii_lower((unsigned char)query[matched]) ==
+            minux_ascii_lower((unsigned char)candidate[i])) {
+            if (matched > 0u && i > previous + 1u) gaps += i - previous - 1u;
+            previous = i;
+            ++matched;
+        }
+    }
+    if (matched != query_len) return -1;
+    {
+        int score = 200 - (int)(gaps * 8u) - (int)(candidate_len - query_len);
+        return score > 0 ? score : 1;
     }
 }

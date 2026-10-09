@@ -1,4 +1,4 @@
-use egui::Color32;
+use eframe::egui::Color32;
 use serde::Deserialize;
 use std::sync::OnceLock;
 

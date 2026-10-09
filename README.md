@@ -26,7 +26,7 @@ GitHub Actions is **manual-only**. Start it from the Actions page with **Run wor
 
 The client uses the OpenAI-compatible router at `https://router.huggingface.co/v1/chat/completions`. Requests run on worker threads. The model ID is validated before sending. If settings contain the previous concatenated value `zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct`, MINUX strips the known appended default and preserves the valid prefix `zai-org/GLM-5.3`. If the cleaned ID is not available to Hugging Face, the agent gives a model-not-found explanation and asks you to select an ID from the available-model list. A genuine `model_not_found` error now explains that the chosen ID/provider is unavailable.
 
-The agent can list workspace files, read text files, create folders and files, and edit files. Paths are restricted to the opened project, reads/writes are limited to 2 MiB, secret files are blocked, and agent tools do not delete files or execute shell commands.
+The agent can list workspace files, search text across bounded project trees, read text files, create folders/files, and edit files. It now has a safe `replace_in_file` tool that only edits a fragment when it occurs exactly once, reducing accidental broad rewrites. Temporary HTTP failures (429/5xx) receive a small bounded backoff. Paths are restricted to the opened project, reads/writes are limited to 2 MiB, secret files are blocked, and agent tools do not delete files or execute shell commands.
 
 The token and appearance/recent-project settings are saved locally in `%APPDATA%\\MINUX-IDE\\settings.json` on Windows, without encryption. Do not publish or share the file.
 
@@ -46,9 +46,10 @@ The native desktop shell and file editor are still hosted by Rust/egui; C is the
 ## Editor and customization
 
 - Initial screen asks which project folder to open and shows recent folders instead of immediately opening the current working directory.
-- The AI sidebar animates open/closed using the native C easing function; SVG stroke widths are reduced for a lighter icon weight.
-- Settings include accent palettes, corner radius, editor font size, animations, Hugging Face model, thinking and response token limit.
-- SVG icon assets are bundled locally.
+- The AI sidebar and home/editor transitions use native C easing; transition speed is configurable.
+- Settings include four built-in palettes, a custom color picker, corner radius, editor font size, animation speed, Hugging Face model, thinking and response token limit. Appearance settings persist with the rest of the local settings.
+- C handles ranked exact/prefix/substring/fuzzy filename scoring used by the search panel, as well as model-ID checks and easing.
+- SVG icon assets are bundled locally with thinner stroke rendering.
 - Workspace indexing runs in a cancellable worker; generated directories are ignored and tree/search rows are virtualized.
 
 ## Run button

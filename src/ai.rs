@@ -24,6 +24,8 @@ pub struct AiSettings {
     pub animations_enabled: bool,
     pub editor_font_size: f32,
     pub recent_workspaces: Vec<String>,
+    pub custom_accent: String,
+    pub animation_speed: f32,
 }
 
 impl Default for AiSettings {
@@ -38,6 +40,8 @@ impl Default for AiSettings {
             animations_enabled: true,
             editor_font_size: 13.5,
             recent_workspaces: Vec::new(),
+            custom_accent: "#6E9BFF".into(),
+            animation_speed: 1.0,
         }
     }
 }
@@ -81,7 +85,7 @@ fn config_path() -> PathBuf {
 }
 
 pub fn load_settings() -> AiSettings {
-    let mut settings = fs::read(config_path())
+    let mut settings: AiSettings = fs::read(config_path())
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
@@ -90,12 +94,30 @@ pub fn load_settings() -> AiSettings {
         .unwrap_or_else(|_| AiSettings::default().model);
     settings.corner_radius = settings.corner_radius.clamp(3, 14);
     settings.editor_font_size = settings.editor_font_size.clamp(11.0, 20.0);
+    settings.animation_speed = if settings.animation_speed.is_finite() {
+        settings.animation_speed.clamp(0.5, 2.0)
+    } else {
+        1.0
+    };
+    settings.custom_accent = normalize_hex_color(&settings.custom_accent);
     settings.recent_workspaces.truncate(8);
     settings
 }
 
 unsafe extern "C" {
     fn minux_model_id_is_valid(data: *const u8, length: usize) -> i32;
+}
+
+fn normalize_hex_color(input: &str) -> String {
+    let value = input.trim();
+    if value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        format!("#{}", value[1..].to_ascii_uppercase())
+    } else {
+        "#6E9BFF".to_owned()
+    }
 }
 
 fn c_model_id_is_valid(value: &str) -> bool {
@@ -195,7 +217,7 @@ fn format_hf_error(status: u16, body: &str) -> String {
             .and_then(|value| value.pointer("/error/message").or_else(|| value.get("message")))
             .and_then(Value::as_str)
             .unwrap_or("Модель не существует или недоступна этому endpoint.");
-        return format!("MINUX Agent: Hugging Face не нашёл модель. Проверь точный ID и доступность Inference Provider. {message}");
+        return format!("MINUX Agent: Hugging Face не нашёл модель. Проверь точный ID и доступность Inference Provider. Открой настройки и выбери точную модель из списка доступных. {message}");
     }
 
     let detail = parsed
@@ -241,7 +263,7 @@ pub fn run_agent(
     let client = build_client()?;
 
     let system = format!(
-        "You are MINUX Agent, an AI coding assistant inside a local desktop IDE.\n        The user workspace root is: {}\n        You can inspect and change project files with the provided tools. Use tools instead of claiming an operation is done.\n        All paths passed to tools must be relative to the workspace. Never access paths outside the workspace.\n        Never read or write secret files such as .env, private keys, credentials, or secret stores.\n        Before editing an existing file, read it first. Preserve unrelated code and make minimal targeted changes.\n        For new project structures, create directories and files through tools. Never delete files.\n        When done, summarize concrete files changed and any checks that were or were not run.\n        Answer in the user's language. Do not invent tool results.",
+        "You are MINUX Agent, an AI coding assistant inside a local desktop IDE.\n        The user workspace root is: {}\n        Inspect project files with list_project_files and search_project before making changes. Read each existing file before editing it. Prefer replace_in_file for a unique targeted change; use write_file only when replacing the complete intended file.\n        You can inspect and change project files with the provided tools. Use tools instead of claiming an operation is done.\n        All paths passed to tools must be relative to the workspace. Never access paths outside the workspace.\n        Never read or write secret files such as .env, private keys, credentials, or secret stores.\n        Preserve unrelated code and make minimal targeted changes. For new project structures, create directories and files through tools. Never delete files or execute shell commands.\n        When done, summarize concrete files changed and any checks that were or were not run.\n        Answer in the user's language. Do not invent tool results.",
         root.display()
     );
 
@@ -296,7 +318,7 @@ pub fn run_agent(
                     value => value,
                 };
                 let outcome = execute_tool(name, &arguments, &root);
-                if matches!(name, "write_file" | "create_file" | "create_directory")
+                if matches!(name, "write_file" | "create_file" | "create_directory" | "replace_in_file")
                     && !outcome.starts_with("Ошибка инструмента:")
                 {
                     workspace_changed = true;
@@ -343,7 +365,7 @@ fn request_assistant(
     let mut send_thinking = settings.thinking_enabled;
     let mut send_tools = true;
 
-    for _attempt in 0..3 {
+    for _attempt in 0..5 {
         let mut payload = json!({
             "model": settings.model.as_str(),
             "messages": active_messages.clone(),
@@ -375,6 +397,15 @@ fn request_assistant(
         }
 
         let lower = body.to_ascii_lowercase();
+        if matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504) && _attempt < 2 {
+            let delay_ms = if status.as_u16() == 429 {
+                900 + (_attempt as u64 * 700)
+            } else {
+                300 * (1_u64 << _attempt)
+            };
+            std::thread::sleep(Duration::from_millis(delay_ms));
+            continue;
+        }
         if matches!(status.as_u16(), 400 | 422)
             && send_thinking
             && (lower.contains("chat_template_kwargs")
@@ -480,6 +511,16 @@ fn tool_definitions() -> Value {
             "name":"write_file",
             "description":"Write or replace a UTF-8 text file inside the workspace. Read existing files first and preserve unrelated content.",
             "parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}
+        }},
+        {"type":"function","function":{
+            "name":"search_project",
+            "description":"Search case-insensitive text across UTF-8 source files in the workspace. Use this before editing to find exact symbols and references.",
+            "parameters":{"type":"object","properties":{"query":{"type":"string","description":"Text or symbol to find"},"path":{"type":"string","description":"Optional relative directory, defaults to '.'"}},"required":["query"]}
+        }},
+        {"type":"function","function":{
+            "name":"replace_in_file",
+            "description":"Replace an exact text fragment in one file only when it occurs exactly once. Use read_file first and preserve unrelated content.",
+            "parameters":{"type":"object","properties":{"path":{"type":"string"},"search":{"type":"string","description":"Exact old text; must occur once"},"replacement":{"type":"string","description":"New text"}},"required":["path","search","replacement"]}
         }}
     ])
 }
@@ -507,6 +548,17 @@ fn execute_tool(name: &str, arguments: &Value, root: &Path) -> String {
             let rel = arguments.get("path").and_then(Value::as_str).unwrap_or("");
             let content = arguments.get("content").and_then(Value::as_str).unwrap_or("");
             write_workspace_file(root, rel, content)
+        }
+        "search_project" => {
+            let query = arguments.get("query").and_then(Value::as_str).unwrap_or("");
+            let rel = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+            search_workspace_files(root, rel, query)
+        }
+        "replace_in_file" => {
+            let rel = arguments.get("path").and_then(Value::as_str).unwrap_or("");
+            let search = arguments.get("search").and_then(Value::as_str).unwrap_or("");
+            let replacement = arguments.get("replacement").and_then(Value::as_str).unwrap_or("");
+            replace_workspace_text(root, rel, search, replacement)
         }
         _ => Err(format!("Инструмент '{name}' не существует.")),
     };
@@ -600,6 +652,133 @@ fn list_project_files(root: &Path, relative: &str) -> Result<String, String> {
     }
 }
 
+fn search_workspace_files(root: &Path, relative: &str, query: &str) -> Result<String, String> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Err("Укажи текст или имя символа для поиска.".into());
+    }
+    if needle.len() > 200 {
+        return Err("Строка поиска слишком длинная (максимум 200 байт).".into());
+    }
+
+    let start = resolve_workspace_path(root, relative)?;
+    if !start.is_dir() {
+        return Err(format!("'{}' не является каталогом.", relative));
+    }
+
+    let mut stack: Vec<(PathBuf, usize)> = vec![(start, 0)];
+    let mut visited_entries = 0usize;
+    let mut matches: Vec<String> = Vec::new();
+    let mut truncated = false;
+
+    while let Some((directory, depth)) = stack.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.filter_map(Result::ok) {
+            visited_entries += 1;
+            if visited_entries > 4000 || matches.len() >= 120 {
+                truncated = true;
+                break;
+            }
+
+            let item_path = entry.path();
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(_) => continue,
+            };
+            if kind.is_symlink() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if kind.is_dir() {
+                if depth < 16 && !matches!(name.as_str(),
+                    ".git" | "target" | "node_modules" | "dist" | "build" | "bin" | "obj" | ".venv" | "venv"
+                ) {
+                    stack.push((item_path, depth + 1));
+                }
+                continue;
+            }
+            if !kind.is_file() {
+                continue;
+            }
+
+            let relative_path = match item_path.strip_prefix(root) {
+                Ok(path) => path.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            if resolve_workspace_path(root, &relative_path).is_err() {
+                continue;
+            }
+            match fs::metadata(&item_path) {
+                Ok(metadata) if metadata.len() <= 512 * 1024 => {}
+                _ => continue,
+            }
+            let contents = match fs::read_to_string(&item_path) {
+                Ok(contents) => contents,
+                Err(_) => continue,
+            };
+            for (line_number, line) in contents.lines().enumerate() {
+                if line.to_lowercase().contains(&needle) {
+                    let snippet: String = line.chars().take(240).collect();
+                    matches.push(format!("{relative_path}:{}: {snippet}", line_number + 1));
+                    if matches.len() >= 120 {
+                        truncated = true;
+                        break;
+                    }
+                }
+            }
+            if truncated {
+                break;
+            }
+        }
+        if truncated {
+            break;
+        }
+    }
+
+    if matches.is_empty() {
+        Ok("Совпадений не найдено.".into())
+    } else {
+        let mut output = matches.join("\n");
+        if output.len() > 28 * 1024 {
+            let mut end = 28 * 1024;
+            while !output.is_char_boundary(end) { end -= 1; }
+            output.truncate(end);
+            truncated = true;
+        }
+        if truncated {
+            output.push_str("\n… поиск ограничен лимитом 4000 элементов / 120 совпадений.");
+        }
+        Ok(output)
+    }
+}
+
+fn replace_workspace_text(root: &Path, relative: &str, search: &str, replacement: &str) -> Result<String, String> {
+    if search.len() > 128 * 1024 || replacement.len() > MAX_FILE_BYTES as usize {
+        return Err("Фрагмент или замена превышает лимит размера.".into());
+    }
+    let path = resolve_workspace_path(root, relative)?;
+    let contents = read_workspace_file(root, relative)?;
+    let updated = replace_exactly_once(&contents, search, replacement)?;
+    write_workspace_file(root, relative, &updated)?;
+    Ok(format!("Заменён один фрагмент в {}.", path.strip_prefix(root).unwrap_or(&path).display()))
+}
+
+fn replace_exactly_once(contents: &str, search: &str, replacement: &str) -> Result<String, String> {
+    if search.is_empty() {
+        return Err("Фрагмент для замены не может быть пустым.".into());
+    }
+    let occurrences = contents.match_indices(search).take(2).count();
+    match occurrences {
+        0 => Err("Точный фрагмент не найден. Обнови чтение файла и попробуй снова.".into()),
+        1 => Ok(contents.replacen(search, replacement, 1)),
+        _ => Err("Фрагмент встречается несколько раз. Уточни текст для однозначной замены.".into()),
+    }
+}
+
 fn read_workspace_file(root: &Path, relative: &str) -> Result<String, String> {
     let path = resolve_workspace_path(root, relative)?;
     let metadata = fs::metadata(&path).map_err(|e| format!("Не удалось прочитать метаданные: {e}"))?;
@@ -647,7 +826,7 @@ fn write_workspace_file(root: &Path, relative: &str, content: &str) -> Result<St
 
 #[cfg(test)]
 mod model_id_tests {
-    use super::normalize_model_id;
+    use super::{normalize_hex_color, normalize_model_id, replace_exactly_once};
 
     #[test]
     fn repairs_concatenated_legacy_model_id() {
@@ -665,5 +844,19 @@ mod model_id_tests {
     #[test]
     fn rejects_unknown_multi_part_ids() {
         assert!(normalize_model_id("owner/model/second").is_err());
+    }
+
+    #[test]
+    fn normalizes_custom_hex_colors() {
+        assert_eq!(normalize_hex_color("#ab12Ef"), "#AB12EF");
+        assert_eq!(normalize_hex_color("invalid"), "#6E9BFF");
+    }
+
+    #[test]
+    fn exact_replacement_requires_one_match() {
+        assert_eq!(replace_exactly_once("const a = 1;", "a = 1", "a = 2").unwrap(), "const a = 2;");
+        assert!(replace_exactly_once("abc", "", "x").is_err());
+        assert!(replace_exactly_once("abc abc", "abc", "x").is_err());
+        assert!(replace_exactly_once("abc", "missing", "x").is_err());
     }
 }

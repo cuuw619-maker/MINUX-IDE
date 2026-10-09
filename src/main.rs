@@ -24,6 +24,8 @@ use std::{
 unsafe extern "C" {
     fn minux_engine_version() -> u32;
     fn minux_ease_out_cubic(progress: f32) -> f32;
+    fn minux_ease_in_out_cubic(progress: f32) -> f32;
+    fn minux_search_score(query: *const u8, query_len: usize, candidate: *const u8, candidate_len: usize) -> i32;
 }
 
 #[derive(Clone)]
@@ -82,8 +84,10 @@ struct MinuxIde {
     run_output: String,
     available_models: Vec<String>,
     theme_accent: String,
+    custom_accent: String,
     corner_radius: u8,
     animations_enabled: bool,
+    animation_speed: f32,
     editor_font_size: f32,
     recent_workspaces: Vec<String>,
     ai_tx: Sender<AiEvent>,
@@ -140,9 +144,11 @@ impl Default for MinuxIde {
             run_pending: false,
             run_output: String::new(),
             available_models: Vec::new(),
-            theme_accent: if theme::valid_id(&settings.theme_accent) { settings.theme_accent.clone() } else { theme::default_id().to_owned() },
+            theme_accent: if settings.theme_accent == "custom" || theme::valid_id(&settings.theme_accent) { settings.theme_accent.clone() } else { theme::default_id().to_owned() },
+            custom_accent: settings.custom_accent,
             corner_radius: settings.corner_radius.clamp(3, 14),
             animations_enabled: settings.animations_enabled,
+            animation_speed: settings.animation_speed.clamp(0.5, 2.0),
             editor_font_size: settings.editor_font_size.clamp(11.0, 20.0),
             recent_workspaces: settings.recent_workspaces,
             ai_tx,
@@ -415,13 +421,30 @@ impl MinuxIde {
             self.search_results.clear();
             return;
         }
-        self.search_results = self.all_files.iter()
-            .filter(|path| path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.to_lowercase().contains(&needle)))
-            .take(500)
-            .cloned()
-            .collect();
+
+        let mut ranked: Vec<(i32, PathBuf)> = self.all_files.iter().filter_map(|path| {
+            let name = path.file_name().and_then(|name| name.to_str())?;
+            let score = unsafe {
+                minux_search_score(
+                    needle.as_ptr(),
+                    needle.len(),
+                    name.as_bytes().as_ptr(),
+                    name.len(),
+                )
+            };
+            if score >= 0 {
+                Some((score, path.clone()))
+            } else if name.to_lowercase().contains(&needle) {
+                Some((1, path.clone()))
+            } else {
+                None
+            }
+        }).collect();
+
+        ranked.sort_by(|(score_a, path_a), (score_b, path_b)| {
+            score_b.cmp(score_a).then_with(|| path_a.cmp(path_b))
+        });
+        self.search_results = ranked.into_iter().take(500).map(|(_, path)| path).collect();
     }
 
     fn open_file(&mut self, path: PathBuf) {
@@ -452,11 +475,25 @@ impl MinuxIde {
             animations_enabled: self.animations_enabled,
             editor_font_size: self.editor_font_size,
             recent_workspaces: self.recent_workspaces.clone(),
+            custom_accent: self.custom_accent.clone(),
+            animation_speed: self.animation_speed,
         }
     }
 
     fn accent_color(&self) -> Color32 {
-        theme::accent(&self.theme_accent)
+        if self.theme_accent == "custom" {
+            theme::color(&self.custom_accent)
+        } else {
+            theme::accent(&self.theme_accent)
+        }
+    }
+
+    fn accent_background(&self) -> Color32 {
+        if self.theme_accent == "custom" {
+            self.accent_color().gamma_multiply(0.24)
+        } else {
+            theme::accent_bg(&self.theme_accent)
+        }
     }
 
     fn save_ai_settings(&mut self) {
@@ -881,15 +918,26 @@ impl MinuxIde {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Акцентный цвет").size(11.5).color(TEXT));
             egui::ComboBox::from_id_salt("minux_theme_accent")
-                .selected_text(theme::palette(&self.theme_accent).name.as_str())
+                .selected_text(if self.theme_accent == "custom" { "Своя палитра" } else { theme::palette(&self.theme_accent).name.as_str() })
                 .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.theme_accent, "custom".to_owned(), "Своя палитра");
                     for palette in theme::all() {
                         ui.selectable_value(&mut self.theme_accent, palette.id.clone(), palette.name.as_str());
                     }
                 });
         });
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Свой акцент").size(11.5).color(TEXT));
+            let mut custom_color = theme::color(&self.custom_accent);
+            if ui.color_edit_button_srgba(&mut custom_color).changed() {
+                self.custom_accent = format!("#{:02X}{:02X}{:02X}", custom_color.r(), custom_color.g(), custom_color.b());
+                self.theme_accent = "custom".into();
+            }
+            ui.label(RichText::new(&self.custom_accent).monospace().size(10.0).color(MUTED));
+        });
         ui.add(egui::Slider::new(&mut self.corner_radius, 3..=14).text("Закругление"));
         ui.add(egui::Slider::new(&mut self.editor_font_size, 11.0..=20.0).step_by(0.5).text("Размер шрифта"));
+        ui.add(egui::Slider::new(&mut self.animation_speed, 0.5..=2.0).step_by(0.1).text("Скорость переходов"));
         ui.checkbox(&mut self.animations_enabled, "Анимации панелей");
         ui.add_space(12.0);
         ui.separator();
@@ -1208,18 +1256,28 @@ impl eframe::App for MinuxIde {
             self.settings_open = false;
         }
 
-        apply_theme(ctx, self.accent_color(), theme::accent_bg(&self.theme_accent), self.corner_radius);
+        apply_theme(ctx, self.accent_color(), self.accent_background(), self.corner_radius);
+
+        let view_progress = if self.animations_enabled {
+            let duration = 0.28 / self.animation_speed.clamp(0.5, 2.0);
+            let raw = ctx.animate_bool_with_time(egui::Id::new("minux-view-transition"), !self.show_home, duration);
+            unsafe { minux_ease_in_out_cubic(raw) }
+        } else if self.show_home { 0.0 } else { 1.0 };
 
         if self.show_home {
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(BG))
                 .show(ctx, |ui| self.draw_home(ui));
+            if self.animations_enabled && view_progress > 0.001 {
+                paint_transition_overlay(ctx, (view_progress * 68.0) as u8);
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
             return;
         }
 
         egui::TopBottomPanel::top("main_toolbar")
             .exact_height(48.0)
-            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0, BORDER)))
+            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0_f32, BORDER)))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(4.0);
@@ -1290,7 +1348,7 @@ impl eframe::App for MinuxIde {
         egui::SidePanel::left("activity_rail")
             .exact_width(50.0)
             .resizable(false)
-            .frame(egui::Frame::new().fill(RAIL_BG).stroke(Stroke::new(1.0, BORDER)))
+            .frame(egui::Frame::new().fill(RAIL_BG).stroke(Stroke::new(1.0_f32, BORDER)))
             .show(ctx, |ui| {
                 ui.add_space(10.0);
                 if activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник") .clicked() {
@@ -1322,15 +1380,16 @@ impl eframe::App for MinuxIde {
             .min_width(210.0)
             .max_width(320.0)
             .resizable(true)
-            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0, BORDER)).inner_margin(egui::Margin::same(10)))
+            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
             .show(ctx, |ui| self.draw_sidebar(ui));
 
         let ai_panel_progress = if self.animations_enabled {
-            let raw = ctx.animate_bool(egui::Id::new("minux-ai-sidebar-open"), self.show_ai);
+            let duration = 0.30 / self.animation_speed.clamp(0.5, 2.0);
+            let raw = ctx.animate_bool_with_time(egui::Id::new("minux-ai-sidebar-open"), self.show_ai, duration);
             if self.show_ai {
                 unsafe { minux_ease_out_cubic(raw) }
             } else {
-                raw * raw * raw
+                unsafe { minux_ease_in_out_cubic(raw) }
             }
         } else if self.show_ai { 1.0 } else { 0.0 };
         if self.show_ai || ai_panel_progress > 0.01 {
@@ -1339,12 +1398,12 @@ impl eframe::App for MinuxIde {
                 .min_width(0.0)
                 .max_width(410.0)
                 .resizable(false)
-                .frame(egui::Frame::new().fill(PANEL.gamma_multiply(ai_panel_progress.max(0.02))).stroke(Stroke::new(1.0, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
+                .frame(egui::Frame::new().fill(PANEL.gamma_multiply(ai_panel_progress.max(0.02))).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
                 .show(ctx, |ui| self.draw_ai_sidebar(ui));
         }
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(EDITOR_BG).inner_margin(egui::Margin::same(12)))
+            .frame(egui::Frame::new().fill(EDITOR_BG).inner_margin(egui::Margin::same(self.corner_radius as i8 + 6)))
             .show(ctx, |ui| {
                 if self.settings_open {
                     self.draw_settings(ui);
@@ -1364,7 +1423,22 @@ impl eframe::App for MinuxIde {
                     }
                 }
             });
+        if self.animations_enabled && view_progress < 0.999 {
+            paint_transition_overlay(ctx, ((1.0 - view_progress) * 68.0) as u8);
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
     }
+}
+
+fn paint_transition_overlay(ctx: &egui::Context, alpha: u8) {
+    if alpha == 0 {
+        return;
+    }
+    let screen = ctx.screen_rect();
+    ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("minux-view-transition-overlay"),
+    )).rect_filled(screen, egui::CornerRadius::same(0), Color32::from_black_alpha(alpha));
 }
 
 fn activity_button(
@@ -1564,6 +1638,24 @@ fn language_display_name(path: &Path) -> &'static str {
         "tcl" => "Tcl",
         "tex" | "ltx" => "LaTeX",
         _ => "Text",
+    }
+}
+
+#[cfg(test)]
+mod native_search_engine_tests {
+    use super::minux_search_score;
+
+    fn score(query: &str, candidate: &str) -> i32 {
+        unsafe {
+            minux_search_score(query.as_ptr(), query.len(), candidate.as_ptr(), candidate.len())
+        }
+    }
+
+    #[test]
+    fn ranks_exact_and_prefix_matches_above_fuzzy_matches() {
+        assert!(score("main.rs", "main.rs") > score("main", "main.rs"));
+        assert!(score("main", "main.rs") > score("mnr", "main.rs"));
+        assert_eq!(score("xyz", "main.rs"), -1);
     }
 }
 
