@@ -2,6 +2,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Component, Path, PathBuf},
     time::Duration,
@@ -26,6 +27,7 @@ pub struct AiSettings {
     pub recent_workspaces: Vec<String>,
     pub custom_accent: String,
     pub animation_speed: f32,
+    pub ui_scale: f32,
 }
 
 impl Default for AiSettings {
@@ -42,6 +44,7 @@ impl Default for AiSettings {
             recent_workspaces: Vec::new(),
             custom_accent: "#6E9BFF".into(),
             animation_speed: 1.0,
+            ui_scale: 1.0,
         }
     }
 }
@@ -100,6 +103,11 @@ pub fn load_settings() -> AiSettings {
         1.0
     };
     settings.custom_accent = normalize_hex_color(&settings.custom_accent);
+    settings.ui_scale = if settings.ui_scale.is_finite() {
+        settings.ui_scale.clamp(0.85, 1.25)
+    } else {
+        1.0
+    };
     settings.recent_workspaces.truncate(8);
     settings
 }
@@ -263,7 +271,7 @@ pub fn run_agent(
     let client = build_client()?;
 
     let system = format!(
-        "You are MINUX Agent, an AI coding assistant inside a local desktop IDE.\n        The user workspace root is: {}\n        Inspect project files with list_project_files and search_project before making changes. Read each existing file before editing it. Prefer replace_in_file for a unique targeted change; use write_file only when replacing the complete intended file.\n        You can inspect and change project files with the provided tools. Use tools instead of claiming an operation is done.\n        All paths passed to tools must be relative to the workspace. Never access paths outside the workspace.\n        Never read or write secret files such as .env, private keys, credentials, or secret stores.\n        Preserve unrelated code and make minimal targeted changes. For new project structures, create directories and files through tools. Never delete files or execute shell commands.\n        When done, summarize concrete files changed and any checks that were or were not run.\n        Answer in the user's language. Do not invent tool results.",
+        "You are MINUX Agent, an AI coding assistant inside a local desktop IDE.\n        The user workspace root is: {}\n        For multi-file or cross-language requests, call project_overview first to learn the source-language mix and build manifests. Follow the existing architecture and make each change in the language best suited to the component; do not default to Rust when the project already uses another language for that part. Keep language boundaries small and document any new FFI or generated-file contract.\n        Inspect project files with list_project_files and search_project before making changes. Read each existing file before editing it. Prefer replace_in_file for a unique targeted change; use write_file only when replacing the complete intended file.\n        You can inspect and change project files with the provided tools. Use tools instead of claiming an operation is done.\n        All paths passed to tools must be relative to the workspace. Never access paths outside the workspace.\n        Never read or write secret files such as .env, private keys, credentials, or secret stores.\n        Preserve unrelated code and make minimal targeted changes. For new project structures, create directories and files through tools. Never delete files or execute shell commands.\n        When done, summarize concrete files changed and any checks that were or were not run.\n        Answer in the user's language. Do not invent tool results.",
         root.display()
     );
 
@@ -488,6 +496,11 @@ fn split_thinking_tags(input: &str) -> (String, Option<String>) {
 fn tool_definitions() -> Value {
     json!([
         {"type":"function","function":{
+            "name":"project_overview",
+            "description":"Inspect the workspace structure, language mix and build manifests without reading file contents. Use before broad or multi-language changes.",
+            "parameters":{"type":"object","properties":{}}
+        }},
+        {"type":"function","function":{
             "name":"list_project_files",
             "description":"List files and directories in a directory inside the current workspace. Use path='.' for the root.",
             "parameters":{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path, default '.'"}}}
@@ -527,6 +540,7 @@ fn tool_definitions() -> Value {
 
 fn execute_tool(name: &str, arguments: &Value, root: &Path) -> String {
     let result = match name {
+        "project_overview" => project_overview(root),
         "list_project_files" => {
             let rel = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
             list_project_files(root, rel)
@@ -566,6 +580,167 @@ fn execute_tool(name: &str, arguments: &Value, root: &Path) -> String {
         Ok(message) => message,
         Err(message) => format!("Ошибка инструмента: {message}"),
     }
+}
+
+fn project_overview(root: &Path) -> Result<String, String> {
+    if !root.is_dir() {
+        return Err("Рабочая папка недоступна.".into());
+    }
+
+    const MAX_ENTRIES: usize = 6000;
+    const IGNORED_DIRECTORIES: &[&str] = &[
+        ".git", ".hg", ".svn", "target", "node_modules", "dist", "build",
+        "bin", "obj", ".venv", "venv", "__pycache__", ".next", ".cache", "vendor",
+    ];
+    const MANIFEST_NAMES: &[&str] = &[
+        "cargo.toml", "package.json", "tsconfig.json", "pyproject.toml",
+        "requirements.txt", "requirements-dev.txt", "cmakelists.txt", "makefile",
+        "go.mod", "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle",
+        "settings.gradle.kts", "composer.json", "gemfile", "dockerfile",
+        "justfile", "readme.md",
+    ];
+
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    let mut visited_entries = 0usize;
+    let mut file_count = 0usize;
+    let mut truncated = false;
+    let mut languages: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut manifests: Vec<String> = Vec::new();
+
+    while let Some((directory, depth)) = stack.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.filter_map(Result::ok) {
+            visited_entries += 1;
+            if visited_entries > MAX_ENTRIES {
+                truncated = true;
+                break;
+            }
+
+            let item_path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if file_type.is_dir() {
+                if depth < 16 && !IGNORED_DIRECTORIES.contains(&name.as_str()) {
+                    stack.push((item_path, depth + 1));
+                }
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+
+            file_count += 1;
+            if let Some(language) = project_language(&item_path) {
+                *languages.entry(language).or_insert(0) += 1;
+            }
+
+            let is_manifest = MANIFEST_NAMES.contains(&name.as_str())
+                || name.ends_with(".csproj")
+                || name.ends_with(".sln")
+                || name.ends_with(".xcworkspace")
+                || name.ends_with(".xcodeproj");
+            if is_manifest && manifests.len() < 24 {
+                if let Ok(relative) = item_path.strip_prefix(root) {
+                    manifests.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        if truncated {
+            break;
+        }
+    }
+
+    manifests.sort();
+    manifests.dedup();
+    let mut lines = vec![
+        format!("Workspace: {}", root.display()),
+        format!("Files encountered: {file_count}"),
+    ];
+    if truncated {
+        lines.push(format!("Note: scan stopped at the {MAX_ENTRIES}-entry safety limit."));
+    }
+
+    lines.push("Detected source languages:".into());
+    if languages.is_empty() {
+        lines.push("- No recognized source files.".into());
+    } else {
+        for (language, count) in languages {
+            lines.push(format!("- {language}: {count} file(s)"));
+        }
+    }
+
+    lines.push("Build manifests and project entry points:".into());
+    if manifests.is_empty() {
+        lines.push("- None of the common manifests were found.".into());
+    } else {
+        for path in manifests {
+            lines.push(format!("- {path}"));
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+fn project_language(path: &Path) -> Option<&'static str> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    match name.as_str() {
+        "makefile" | "gnumakefile" => return Some("Make"),
+        "dockerfile" => return Some("Docker"),
+        "justfile" => return Some("Just"),
+        _ => {}
+    }
+
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match extension.as_str() {
+        "rs" => "Rust",
+        "c" | "h" => "C",
+        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "C++",
+        "cs" => "C#",
+        "ts" | "tsx" | "mts" | "cts" => "TypeScript",
+        "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
+        "py" | "pyw" => "Python",
+        "sh" | "bash" => "Shell",
+        "ps1" | "psm1" => "PowerShell",
+        "xsl" | "xslt" => "XSLT",
+        "xml" | "csproj" | "sln" => "XML",
+        "html" | "htm" => "HTML",
+        "css" | "scss" | "sass" | "less" => "CSS",
+        "json" => "JSON",
+        "yaml" | "yml" => "YAML",
+        "md" | "mdx" => "Markdown",
+        "go" => "Go",
+        "java" => "Java",
+        "kt" | "kts" => "Kotlin",
+        "swift" => "Swift",
+        "php" => "PHP",
+        "rb" => "Ruby",
+        "lua" => "Lua",
+        "sql" => "SQL",
+        "toml" => "TOML",
+        "gradle" => "Groovy",
+        "scala" => "Scala",
+        "fs" | "fsx" => "F#",
+        "hs" => "Haskell",
+        "clj" | "cljs" => "Clojure",
+        "r" => "R",
+        "m" => "Objective-C / MATLAB",
+        "pl" | "pm" => "Perl",
+        "ex" | "exs" => "Elixir",
+        "erl" | "hrl" => "Erlang",
+        "dart" => "Dart",
+        "vue" => "Vue",
+        "svelte" => "Svelte",
+        _ => return None,
+    })
 }
 
 fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -826,7 +1001,8 @@ fn write_workspace_file(root: &Path, relative: &str, content: &str) -> Result<St
 
 #[cfg(test)]
 mod model_id_tests {
-    use super::{normalize_hex_color, normalize_model_id, replace_exactly_once};
+    use std::path::Path;
+    use super::{normalize_hex_color, normalize_model_id, project_language, replace_exactly_once};
 
     #[test]
     fn repairs_concatenated_legacy_model_id() {
@@ -850,6 +1026,17 @@ mod model_id_tests {
     fn normalizes_custom_hex_colors() {
         assert_eq!(normalize_hex_color("#ab12Ef"), "#AB12EF");
         assert_eq!(normalize_hex_color("invalid"), "#6E9BFF");
+    }
+
+    #[test]
+    fn language_inventory_recognizes_the_polyglot_toolchain() {
+        assert_eq!(project_language(Path::new("src/main.rs")), Some("Rust"));
+        assert_eq!(project_language(Path::new("native/c/engine.c")), Some("C"));
+        assert_eq!(project_language(Path::new("web/model_id.ts")), Some("TypeScript"));
+        assert_eq!(project_language(Path::new("web/model_id.mjs")), Some("JavaScript"));
+        assert_eq!(project_language(Path::new("scripts/audit.py")), Some("Python"));
+        assert_eq!(project_language(Path::new("resources/themes.xsl")), Some("XSLT"));
+        assert_eq!(project_language(Path::new("Makefile")), Some("Make"));
     }
 
     #[test]

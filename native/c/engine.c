@@ -4,7 +4,7 @@
 
 /* Small native core shared by editor search, animation and model-ID checks. */
 uint32_t minux_engine_version(void) {
-    return 3u;
+    return 4u;
 }
 
 int minux_model_id_is_valid(const uint8_t *data, size_t length) {
@@ -32,7 +32,7 @@ int minux_model_id_is_valid(const uint8_t *data, size_t length) {
 }
 
 float minux_ease_out_cubic(float progress) {
-    if (progress < 0.0f) progress = 0.0f;
+    if (!(progress >= 0.0f)) progress = 0.0f;
     if (progress > 1.0f) progress = 1.0f;
     {
         const float inverse = 1.0f - progress;
@@ -40,14 +40,39 @@ float minux_ease_out_cubic(float progress) {
     }
 }
 
+float minux_ease_out_quint(float progress) {
+    if (!(progress >= 0.0f)) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+    {
+        const float inverse = 1.0f - progress;
+        const float inverse2 = inverse * inverse;
+        return 1.0f - inverse2 * inverse2 * inverse;
+    }
+}
+
 float minux_ease_in_out_cubic(float progress) {
-    if (progress < 0.0f) progress = 0.0f;
+    if (!(progress >= 0.0f)) progress = 0.0f;
     if (progress > 1.0f) progress = 1.0f;
     if (progress < 0.5f) return 4.0f * progress * progress * progress;
     {
         const float inverse = -2.0f * progress + 2.0f;
         return 1.0f - (inverse * inverse * inverse) / 2.0f;
     }
+}
+
+static int minux_is_word_boundary(const uint8_t *candidate, size_t index) {
+    if (index == 0u) return 1;
+    const unsigned char previous = (unsigned char)candidate[index - 1u];
+    const unsigned char current = (unsigned char)candidate[index];
+    if (previous == (unsigned char)'/' || previous == (unsigned char)'\\' ||
+        previous == (unsigned char)'_' || previous == (unsigned char)'-' ||
+        previous == (unsigned char)'.' || previous == (unsigned char)' ' ||
+        previous == (unsigned char)':') return 1;
+    if (previous >= (unsigned char)'a' && previous <= (unsigned char)'z' &&
+        current >= (unsigned char)'A' && current <= (unsigned char)'Z') return 1;
+    if (previous >= (unsigned char)'0' && previous <= (unsigned char)'9' &&
+        !(current >= (unsigned char)'0' && current <= (unsigned char)'9')) return 1;
+    return 0;
 }
 
 static unsigned char minux_ascii_lower(unsigned char value) {
@@ -89,18 +114,22 @@ int32_t minux_search_score(const uint8_t *query, size_t query_len,
 
     size_t matched = 0u;
     size_t gaps = 0u;
+    size_t boundaries = 0u;
     size_t previous = 0u;
     for (size_t i = 0u; i < candidate_len && matched < query_len; ++i) {
         if (minux_ascii_lower((unsigned char)query[matched]) ==
             minux_ascii_lower((unsigned char)candidate[i])) {
             if (matched > 0u && i > previous + 1u) gaps += i - previous - 1u;
+            if (minux_is_word_boundary(candidate, i)) ++boundaries;
             previous = i;
             ++matched;
         }
     }
     if (matched != query_len) return -1;
     {
-        int score = 200 - (int)(gaps * 8u) - (int)(candidate_len - query_len);
+        const size_t bounded_bonus = boundaries > 6u ? 6u : boundaries;
+        int score = 200 + (int)(bounded_bonus * 8u) -
+                    (int)(gaps * 8u) - (int)(candidate_len - query_len);
         return score > 0 ? score : 1;
     }
 }

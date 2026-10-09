@@ -24,6 +24,7 @@ use std::{
 unsafe extern "C" {
     fn minux_engine_version() -> u32;
     fn minux_ease_out_cubic(progress: f32) -> f32;
+    fn minux_ease_out_quint(progress: f32) -> f32;
     fn minux_ease_in_out_cubic(progress: f32) -> f32;
     fn minux_search_score(query: *const u8, query_len: usize, candidate: *const u8, candidate_len: usize) -> i32;
 }
@@ -88,6 +89,7 @@ struct MinuxIde {
     corner_radius: u8,
     animations_enabled: bool,
     animation_speed: f32,
+    ui_scale: f32,
     editor_font_size: f32,
     recent_workspaces: Vec<String>,
     ai_tx: Sender<AiEvent>,
@@ -149,6 +151,7 @@ impl Default for MinuxIde {
             corner_radius: settings.corner_radius.clamp(3, 14),
             animations_enabled: settings.animations_enabled,
             animation_speed: settings.animation_speed.clamp(0.5, 2.0),
+            ui_scale: settings.ui_scale.clamp(0.85, 1.25),
             editor_font_size: settings.editor_font_size.clamp(11.0, 20.0),
             recent_workspaces: settings.recent_workspaces,
             ai_tx,
@@ -424,21 +427,35 @@ impl MinuxIde {
 
         let mut ranked: Vec<(i32, PathBuf)> = self.all_files.iter().filter_map(|path| {
             let name = path.file_name().and_then(|name| name.to_str())?;
-            let score = unsafe {
+            let relative = path.strip_prefix(&self.root).unwrap_or(path)
+                .to_string_lossy().replace('\\', "/");
+            let filename_score = unsafe {
                 minux_search_score(
-                    needle.as_ptr(),
+                    needle.as_bytes().as_ptr(),
                     needle.len(),
                     name.as_bytes().as_ptr(),
                     name.len(),
                 )
             };
-            if score >= 0 {
-                Some((score, path.clone()))
-            } else if name.to_lowercase().contains(&needle) {
-                Some((1, path.clone()))
-            } else {
-                None
-            }
+            let path_score = unsafe {
+                minux_search_score(
+                    needle.as_bytes().as_ptr(),
+                    needle.len(),
+                    relative.as_bytes().as_ptr(),
+                    relative.len(),
+                )
+            };
+
+            let score = match (filename_score, path_score) {
+                (file, full_path) if file >= 0 && full_path >= 0 => {
+                    Some(file.saturating_add(220).max(full_path.saturating_sub(100)))
+                }
+                (file, _) if file >= 0 => Some(file.saturating_add(220)),
+                (_, full_path) if full_path >= 0 => Some(full_path.saturating_sub(100)),
+                _ if name.to_lowercase().contains(&needle) => Some(1),
+                _ => None,
+            }?;
+            Some((score, path.clone()))
         }).collect();
 
         ranked.sort_by(|(score_a, path_a), (score_b, path_b)| {
@@ -477,6 +494,7 @@ impl MinuxIde {
             recent_workspaces: self.recent_workspaces.clone(),
             custom_accent: self.custom_accent.clone(),
             animation_speed: self.animation_speed,
+            ui_scale: self.ui_scale,
         }
     }
 
@@ -938,6 +956,7 @@ impl MinuxIde {
         ui.add(egui::Slider::new(&mut self.corner_radius, 3..=14).text("Закругление"));
         ui.add(egui::Slider::new(&mut self.editor_font_size, 11.0..=20.0).step_by(0.5).text("Размер шрифта"));
         ui.add(egui::Slider::new(&mut self.animation_speed, 0.5..=2.0).step_by(0.1).text("Скорость переходов"));
+        ui.add(egui::Slider::new(&mut self.ui_scale, 0.85..=1.25).step_by(0.05).text("Масштаб интерфейса"));
         ui.checkbox(&mut self.animations_enabled, "Анимации панелей");
         ui.add_space(12.0);
         ui.separator();
@@ -1256,6 +1275,7 @@ impl eframe::App for MinuxIde {
             self.settings_open = false;
         }
 
+        ctx.set_zoom_factor(self.ui_scale.clamp(0.85, 1.25));
         apply_theme(ctx, self.accent_color(), self.accent_background(), self.corner_radius);
 
         let view_progress = if self.animations_enabled {
@@ -1387,7 +1407,7 @@ impl eframe::App for MinuxIde {
             let duration = 0.30 / self.animation_speed.clamp(0.5, 2.0);
             let raw = ctx.animate_bool_with_time(egui::Id::new("minux-ai-sidebar-open"), self.show_ai, duration);
             if self.show_ai {
-                unsafe { minux_ease_out_cubic(raw) }
+                unsafe { minux_ease_out_quint(raw) }
             } else {
                 unsafe { minux_ease_in_out_cubic(raw) }
             }
@@ -1643,7 +1663,7 @@ fn language_display_name(path: &Path) -> &'static str {
 
 #[cfg(test)]
 mod native_search_engine_tests {
-    use super::minux_search_score;
+    use super::{minux_ease_out_quint, minux_search_score};
 
     fn score(query: &str, candidate: &str) -> i32 {
         unsafe {
@@ -1656,6 +1676,18 @@ mod native_search_engine_tests {
         assert!(score("main.rs", "main.rs") > score("main", "main.rs"));
         assert!(score("main", "main.rs") > score("mnr", "main.rs"));
         assert_eq!(score("xyz", "main.rs"), -1);
+        assert!(score("engine", "native/c/engine.c") >= 0);
+    }
+
+    #[test]
+    fn quintic_easing_clamps_endpoints_and_nan() {
+        unsafe {
+            assert_eq!(minux_ease_out_quint(0.0), 0.0);
+            assert_eq!(minux_ease_out_quint(1.0), 1.0);
+            assert_eq!(minux_ease_out_quint(-1.0), 0.0);
+            assert_eq!(minux_ease_out_quint(2.0), 1.0);
+            assert_eq!(minux_ease_out_quint(f32::NAN), 0.0);
+        }
     }
 }
 
