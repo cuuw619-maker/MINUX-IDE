@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<themes default="ocean">
+  <theme id="ocean" name="Ocean Blue" accent="#6E9BFF" accent-bg="#23304A"/>
+  <theme id="violet" name="Soft Violet" accent="#B39CFF" accent-bg="#382F50"/>
+  <theme id="emerald" name="Emerald" accent="#69D6B0" accent-bg="#1F413B"/>
+  <theme id="amber" name="Amber" accent="#F0B86B" accent-bg="#493923"/>
+</themes>

@@ -2,7 +2,7 @@
 name = "minux-ide"
 version = "0.1.0"
 edition = "2021"
-description = "Minimal native AI IDE foundation"
+description = "Native polyglot coding IDE with AI agent"
 build = "build.rs"
 
 [dependencies]

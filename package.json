@@ -1,0 +1,12 @@
+{
+  "name": "minux-ide-tooling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit --strict --target ES2022 --module ES2022 web/model_id.ts",
+    "test:js": "node --test web/model_id.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

@@ -19,6 +19,11 @@ pub struct AiSettings {
     pub model: String,
     pub thinking_enabled: bool,
     pub max_tokens: u32,
+    pub theme_accent: String,
+    pub corner_radius: u8,
+    pub animations_enabled: bool,
+    pub editor_font_size: f32,
+    pub recent_workspaces: Vec<String>,
 }
 
 impl Default for AiSettings {
@@ -28,6 +33,11 @@ impl Default for AiSettings {
             model: "Qwen/Qwen2.5-Coder-32B-Instruct".into(),
             thinking_enabled: true,
             max_tokens: 2048,
+            theme_accent: "ocean".into(),
+            corner_radius: 6,
+            animations_enabled: true,
+            editor_font_size: 13.5,
+            recent_workspaces: Vec::new(),
         }
     }
 }
@@ -71,10 +81,44 @@ fn config_path() -> PathBuf {
 }
 
 pub fn load_settings() -> AiSettings {
-    fs::read(config_path())
+    let mut settings = fs::read(config_path())
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    settings.model = normalize_model_id(&settings.model)
+        .unwrap_or_else(|_| AiSettings::default().model);
+    settings.corner_radius = settings.corner_radius.clamp(3, 14);
+    settings.editor_font_size = settings.editor_font_size.clamp(11.0, 20.0);
+    settings.recent_workspaces.truncate(8);
+    settings
+}
+
+unsafe extern "C" {
+    fn minux_model_id_is_valid(data: *const u8, length: usize) -> i32;
+}
+
+fn c_model_id_is_valid(value: &str) -> bool {
+    // SAFETY: C reads only the byte range passed in and does not retain its pointer.
+    unsafe { minux_model_id_is_valid(value.as_ptr(), value.len()) == 1 }
+}
+
+pub fn normalize_model_id(input: &str) -> Result<String, String> {
+    let value = input.trim().trim_matches(|c| c == '\'' || c == '"' || c == '`').trim();
+    if c_model_id_is_valid(value) {
+        return Ok(value.to_owned());
+    }
+
+    let matches: Vec<&str> = suggested_models()
+        .iter()
+        .copied()
+        .filter(|candidate| value.contains(candidate))
+        .collect();
+    if matches.len() == 1 {
+        return Ok(matches[0].to_owned());
+    }
+
+    Err("Некорректный Hugging Face model ID. Выбери модель из списка или используй формат owner/model.".into())
 }
 
 pub fn save_settings(settings: &AiSettings) -> Result<(), String> {
@@ -130,7 +174,20 @@ pub fn fetch_models(token: &str) -> Result<Vec<String>, String> {
 }
 
 fn format_hf_error(status: u16, body: &str) -> String {
-    let detail = serde_json::from_str::<Value>(body).ok()
+    let parsed = serde_json::from_str::<Value>(body).ok();
+    if status == 400
+        && parsed.as_ref()
+            .and_then(|value| value.pointer("/error/code").or_else(|| value.get("code")))
+            .and_then(Value::as_str) == Some("model_not_found")
+    {
+        let message = parsed.as_ref()
+            .and_then(|value| value.pointer("/error/message").or_else(|| value.get("message")))
+            .and_then(Value::as_str)
+            .unwrap_or("Модель не существует или недоступна этому endpoint.");
+        return format!("MINUX Agent: Hugging Face не нашёл модель. Проверь точный ID и доступность Inference Provider. {message}");
+    }
+
+    let detail = parsed
         .and_then(|v| v.get("error").cloned())
         .and_then(|v| v.as_str().map(str::to_owned).or_else(|| Some(v.to_string())))
         .unwrap_or_else(|| body.to_owned());
@@ -165,6 +222,8 @@ pub fn run_agent(
     if settings.model.trim().is_empty() {
         return Err("Укажи ID модели Hugging Face.".into());
     }
+    let mut settings = settings;
+    settings.model = normalize_model_id(&settings.model)?;
 
     let root = workspace_root.canonicalize()
         .map_err(|e| format!("Не удалось открыть рабочую папку: {e}"))?;
@@ -275,7 +334,7 @@ fn request_assistant(
 
     for _attempt in 0..3 {
         let mut payload = json!({
-            "model": settings.model.trim(),
+            "model": settings.model.as_str(),
             "messages": active_messages.clone(),
             "max_tokens": settings.max_tokens.clamp(256, 8192),
             "temperature": 0.2,
@@ -573,4 +632,27 @@ fn write_workspace_file(root: &Path, relative: &str, content: &str) -> Result<St
     let path = resolve_workspace_path(root, relative)?;
     fs::write(&path, content).map_err(|e| format!("Не удалось записать файл: {e}"))?;
     Ok(format!("Файл сохранён: {}", relative))
+}
+
+#[cfg(test)]
+mod model_id_tests {
+    use super::normalize_model_id;
+
+    #[test]
+    fn repairs_concatenated_legacy_model_id() {
+        assert_eq!(
+            normalize_model_id("zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct").unwrap(),
+            "Qwen/Qwen2.5-Coder-32B-Instruct"
+        );
+    }
+
+    #[test]
+    fn keeps_well_formed_model_ids() {
+        assert_eq!(normalize_model_id("zai-org/GLM-5.3").unwrap(), "zai-org/GLM-5.3");
+    }
+
+    #[test]
+    fn rejects_unknown_multi_part_ids() {
+        assert!(normalize_model_id("owner/model/second").is_err());
+    }
 }
