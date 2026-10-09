@@ -951,10 +951,10 @@ impl MinuxIde {
                 }
             });
         });
-        let connected = !self.api_key.trim().is_empty() && !self.model.trim().is_empty();
+        let connected = !self.model.trim().is_empty();
         ui.horizontal(|ui| {
             ui.label(RichText::new("●").color(if connected { GREEN } else { ORANGE }).size(10.0));
-            ui.label(RichText::new(if connected { self.model.as_str() } else { "Добавь Hugging Face token в настройках" }).size(10.0).color(MUTED));
+            ui.label(RichText::new(if connected { self.model.as_str() } else { "Выбери модель в настройках" }).size(10.0).color(MUTED));
         });
         ui.separator();
 
@@ -987,7 +987,7 @@ impl MinuxIde {
             });
 
         ui.add_space(5.0);
-        if !connected && ui.button("Настроить Hugging Face").clicked() {
+        if !connected && ui.button("Настроить DuckDuckGo API").clicked() {
             self.settings_open = true;
         }
         ui.horizontal(|ui| {
@@ -1616,16 +1616,21 @@ fn activity_button(
     let (rect, response) = ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
-    let hover_t = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
+    let hover_raw = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
+    let hover_t = unsafe { minux_ease_out_quint(hover_raw) };
     if hover_t > 0.01 {
         ui.painter().rect_filled(rect, egui::CornerRadius::same(5),
             (if selected { accent_bg } else { PANEL_RAISED }).gamma_multiply(hover_t));
     }
     if selected {
-        let marker = egui::Rect::from_min_size(rect.left_top(), egui::vec2(2.0, rect.height()));
+        let marker_height = rect.height() * hover_t;
+        let marker = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), rect.center().y - marker_height * 0.5),
+            egui::vec2(2.5, marker_height),
+        );
         ui.painter().rect_filled(marker, egui::CornerRadius::same(1), accent);
     }
-    let icon_extent = icon_size.clamp(14.0, 28.0).min(rect.width() - 10.0);
+    let icon_extent = (icon_size.clamp(14.0, 28.0) * (0.94 + 0.06 * hover_t)).min(rect.width() - 10.0);
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_extent, icon_extent));
     paint_icon_at(ui, icons, icon_name, icon_rect, if selected { accent } else { MUTED });
     response.on_hover_text(tooltip)

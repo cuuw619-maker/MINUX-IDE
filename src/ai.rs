@@ -134,7 +134,7 @@ pub fn load_settings() -> AiSettings {
             .unwrap_or_else(|_| AiSettings::default().model)
     };
     settings.corner_radius = settings.corner_radius.clamp(3, 14);
-    settings.editor_font_size = settings.editor_font_size.clamp(11.0, 20.0);
+    settings.editor_font_size = settings.editor_font_size.clamp(11.0, 30.0);
     settings.animation_speed = if settings.animation_speed.is_finite() {
         settings.animation_speed.clamp(0.5, 2.0)
     } else {
