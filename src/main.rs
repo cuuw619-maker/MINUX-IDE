@@ -649,28 +649,53 @@ impl MinuxIde {
                 ui.add_space(8.0);
                 ui.label(RichText::new("Подсветка Syntect · встроенные грамматики").size(10.0).color(MUTED));
                 ui.separator();
-                for (icon, label) in [
-                    ("lang-rust", "Rust"),
-                    ("lang-typescript", "TypeScript / TSX"),
-                    ("lang-javascript", "JavaScript / JSX"),
-                    ("lang-python", "Python"),
-                    ("lang-c", "C"),
-                    ("lang-cplusplus", "C / C++ headers"),
-                    ("lang-csharp", "C#"),
-                    ("lang-bash", "Shell / Bash"),
-                    ("lang-xml", "XML / XSL / XSLT"),
-                    ("lang-make", "Makefile / GNU Make"),
-                    ("lang-html5", "HTML"),
-                    ("lang-css3", "CSS"),
-                    ("lang-json", "JSON"),
-                    ("lang-yaml", "YAML"),
-                ] {
-                    ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        draw_icon(ui, &self.icons, icon, 17.0, Color32::WHITE);
-                        ui.label(RichText::new(label).size(11.0).color(TEXT));
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .max_height((ui.available_height() - 100.0).max(170.0))
+                    .show(ui, |ui| {
+                        for (icon, label) in [
+                            ("lang-rust", "Rust"),
+                            ("lang-c", "C / C++"),
+                            ("lang-csharp", "C#"),
+                            ("lang-typescript", "TypeScript / TSX"),
+                            ("lang-javascript", "JavaScript / JSX"),
+                            ("lang-python", "Python"),
+                            ("file-code", "Go"),
+                            ("file-code", "Java"),
+                            ("file-code", "Kotlin"),
+                            ("file-code", "Swift"),
+                            ("file-code", "Ruby"),
+                            ("file-code", "PHP"),
+                            ("file-code", "Lua"),
+                            ("file-code", "Scala"),
+                            ("file-code", "Haskell"),
+                            ("file-code", "Clojure"),
+                            ("file-code", "CoffeeScript"),
+                            ("file-code", "F#"),
+                            ("file-code", "Erlang"),
+                            ("file-code", "OCaml"),
+                            ("file-code", "MATLAB / R"),
+                            ("lang-bash", "Shell / Bash"),
+                            ("file-code", "SQL"),
+                            ("lang-xml", "XML / XSL"),
+                            ("lang-html5", "HTML"),
+                            ("lang-css3", "CSS"),
+                            ("lang-json", "JSON"),
+                            ("lang-yaml", "YAML"),
+                            ("file-code", "TOML / INI"),
+                            ("file-text", "Markdown / LaTeX"),
+                            ("file-code", "Diff / Patch"),
+                            ("lang-make", "Makefile / CMake"),
+                            ("file-code", "PowerShell"),
+                            ("file-code", "Dockerfile"),
+                        ] {
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                draw_icon(ui, &self.icons, icon, 16.0, Color32::WHITE);
+                                ui.label(RichText::new(label).size(11.0).color(TEXT));
+                            });
+                        }
                     });
-                }
             }
         }
         ui.add_space(8.0);
@@ -1026,7 +1051,7 @@ impl eframe::App for MinuxIde {
                             if answer.workspace_changed {
                                 self.start_workspace_scan();
                             }
-                            self.ai_history = answer.history;
+                            self.chat_history = answer.history;
                             self.chat_messages.push(ChatEntry {
                                 user: false,
                                 content: answer.content,
@@ -1035,7 +1060,7 @@ impl eframe::App for MinuxIde {
                             self.status = "Ответ получен".into();
                         }
                         Err(error) => {
-                            self.ai_history.push(json!({"role":"assistant","content":error.clone()}));
+                            self.chat_history.push(json!({"role":"assistant","content":error.clone()}));
                             self.chat_messages.push(ChatEntry {
                                 user: false,
                                 content: error.clone(),
@@ -1333,6 +1358,21 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "pl" | "pm" => "Perl",
         "ps1" | "psm1" => "PowerShell",
         "dockerfile" => "Dockerfile",
+        "clj" | "cljs" | "cljc" | "edn" => "Clojure",
+        "coffee" => "CoffeeScript",
+        "d" => "D",
+        "diff" | "patch" => "Diff",
+        "erl" | "hrl" => "Erlang",
+        "fs" | "fsx" => "F#",
+        "groovy" | "gradle" => "Groovy",
+        "hs" | "lhs" => "Haskell",
+        "m" => "MATLAB",
+        "mm" => "Objective-C",
+        "ml" | "mli" => "OCaml",
+        "r" => "R",
+        "scala" | "sc" => "Scala",
+        "tcl" => "Tcl",
+        "tex" | "ltx" => "LaTeX",
         _ => "txt",
     }
 }
@@ -1382,7 +1422,53 @@ fn language_display_name(path: &Path) -> &'static str {
         "kt" | "kts" => "Kotlin",
         "pl" | "pm" => "Perl",
         "ps1" | "psm1" => "PowerShell",
+        "clj" | "cljs" | "cljc" | "edn" => "Clojure",
+        "coffee" => "CoffeeScript",
+        "d" => "D",
+        "diff" | "patch" => "Diff",
+        "erl" | "hrl" => "Erlang",
+        "fs" | "fsx" => "F#",
+        "groovy" | "gradle" => "Groovy",
+        "hs" | "lhs" => "Haskell",
+        "m" => "MATLAB",
+        "mm" => "Objective-C",
+        "ml" | "mli" => "OCaml",
+        "r" => "R",
+        "scala" | "sc" => "Scala",
+        "tcl" => "Tcl",
+        "tex" | "ltx" => "LaTeX",
         _ => "Text",
+    }
+}
+
+#[cfg(test)]
+mod language_support_tests {
+    use super::{language_display_name, syntax_selector_for_path};
+    use std::path::Path;
+
+    #[test]
+    fn recognizes_additional_language_extensions() {
+        let cases = [
+            ("main.clj", "Clojure"),
+            ("script.coffee", "CoffeeScript"),
+            ("module.fs", "F#"),
+            ("build.gradle", "Groovy"),
+            ("Main.hs", "Haskell"),
+            ("plot.m", "MATLAB"),
+            ("bridge.mm", "Objective-C"),
+            ("module.ml", "OCaml"),
+            ("analysis.r", "R"),
+            ("Main.scala", "Scala"),
+            ("script.tcl", "Tcl"),
+            ("paper.tex", "LaTeX"),
+            ("change.patch", "Diff"),
+        ];
+
+        for (file, expected) in cases {
+            let path = Path::new(file);
+            assert_eq!(language_display_name(path), expected, "display name for {file}");
+            assert_eq!(syntax_selector_for_path(path), expected, "syntax selector for {file}");
+        }
     }
 }
 

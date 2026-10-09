@@ -37,8 +37,9 @@ The editor uses `egui_extras` + `Syntect` with bundled syntax definitions for:
 - Python
 - C and C++
 - C#
-- Makefile / GNU Make / CMake
+- Makefile / GNU Make / CMake / Dockerfile
 - HTML, CSS, JSON, YAML, TOML, Markdown, SQL, Java, Go, Lua, PHP, Ruby, Swift, Kotlin, Perl and PowerShell
+- Clojure, CoffeeScript, D, Diff/Patch, Erlang, F#, Groovy, Haskell, MATLAB, Objective-C, OCaml, R, Scala, Tcl and LaTeX
 
 Grammar coverage depends on the definitions bundled with Syntect. Syntax highlighting is not a substitute for LSP diagnostics, code completion or refactoring; these are not implemented yet.
 
