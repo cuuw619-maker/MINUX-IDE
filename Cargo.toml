@@ -1,0 +1,16 @@
+[package]
+name = "minux-ide"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal native AI IDE foundation"
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+rfd = "0.15"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
