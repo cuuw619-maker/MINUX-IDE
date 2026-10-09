@@ -90,6 +90,9 @@ struct MinuxIde {
     animations_enabled: bool,
     animation_speed: f32,
     ui_scale: f32,
+    sidebar_width: f32,
+    icon_size: f32,
+    sidebar_transition_state: bool,
     editor_font_size: f32,
     recent_workspaces: Vec<String>,
     ai_tx: Sender<AiEvent>,
@@ -137,7 +140,7 @@ impl Default for MinuxIde {
             chat_input: String::new(),
             chat_messages: vec![ChatEntry {
                 user: false,
-                content: "MINUX Agent готов. Укажи Hugging Face token в настройках, выбери модель и отправь запрос. Агент может читать и изменять файлы открытого проекта.".into(),
+                content: "MINUX Agent готов. Выбери модель DuckDuckGo Chat API и отправь запрос. Токен можно оставить пустым, если endpoint разрешает анонимные обращения.".into(),
                 reasoning: None,
             }],
             chat_history: Vec::new(),
@@ -151,8 +154,11 @@ impl Default for MinuxIde {
             corner_radius: settings.corner_radius.clamp(3, 14),
             animations_enabled: settings.animations_enabled,
             animation_speed: settings.animation_speed.clamp(0.5, 2.0),
-            ui_scale: settings.ui_scale.clamp(0.85, 1.25),
-            editor_font_size: settings.editor_font_size.clamp(11.0, 20.0),
+            ui_scale: settings.ui_scale.clamp(0.75, 1.50),
+            sidebar_width: settings.sidebar_width.clamp(220.0, 420.0),
+            icon_size: settings.icon_size.clamp(14.0, 28.0),
+            sidebar_transition_state: false,
+            editor_font_size: settings.editor_font_size.clamp(11.0, 30.0),
             recent_workspaces: settings.recent_workspaces,
             ai_tx,
             ai_rx,
@@ -496,6 +502,8 @@ impl MinuxIde {
             custom_accent: self.custom_accent.clone(),
             animation_speed: self.animation_speed,
             ui_scale: self.ui_scale,
+            sidebar_width: self.sidebar_width,
+            icon_size: self.icon_size,
         }
     }
 
@@ -517,21 +525,16 @@ impl MinuxIde {
 
     fn save_ai_settings(&mut self) {
         match ai::save_settings(&self.current_ai_settings()) {
-            Ok(()) => self.status = "Настройки Hugging Face сохранены локально".into(),
+            Ok(()) => self.status = "Настройки DuckDuckGo Chat API сохранены локально".into()
             Err(error) => self.status = error,
         }
     }
 
-    fn fetch_huggingface_models(&mut self) {
-        if self.api_key.trim().is_empty() {
-            self.status = "Сначала введи Hugging Face Access Token".into();
-            self.settings_open = true;
-            return;
-        }
+    fn fetch_endpoint_models(&mut self) {
         let token = self.api_key.clone();
         let tx = self.ai_tx.clone();
         self.models_loading = true;
-        self.status = "Загружаю доступные модели Hugging Face…".into();
+        self.status = "Запрашиваю каталог DuckDuckGo Chat API…".into();
         thread::spawn(move || {
             let result = ai::fetch_models(&token);
             let _ = tx.send(AiEvent::ModelsFinished(result));
@@ -548,27 +551,17 @@ impl MinuxIde {
             reasoning: None,
         });
 
-        if self.api_key.trim().is_empty() {
-            self.chat_messages.push(ChatEntry {
-                user: false,
-                content: "Сначала открой Настройки, добавь Hugging Face Access Token и сохрани его.".into(),
-                reasoning: None,
-            });
-            self.settings_open = true;
-            self.status = "Не задан Hugging Face token".into();
-            return;
-        }
         if self.model.trim().is_empty() {
             self.chat_messages.push(ChatEntry {
                 user: false,
-                content: "Выбери модель Hugging Face или укажи её ID вручную.".into(),
+                content: "Выбери модель DuckDuckGo из списка или введи её ID вручную.".into(),
                 reasoning: None,
             });
             self.settings_open = true;
             return;
         }
 
-        match ai::normalize_model_id(&self.model) {
+        match ai::normalize_duckduckgo_model_id(&self.model) {
             Ok(model) => self.model = model,
             Err(error) => {
                 self.chat_messages.push(ChatEntry { user: false, content: error.clone(), reasoning: None });
@@ -644,6 +637,7 @@ impl MinuxIde {
         }
         let total_rows = self.visible_tree.len();
         let icons = &self.icons;
+        let icon_size = self.icon_size.clamp(14.0, 28.0);
         let expanded_dirs = &self.expanded_dirs;
         let selected_file = self.selected_file.as_ref();
         let mut toggle_path: Option<PathBuf> = None;
@@ -662,10 +656,10 @@ impl MinuxIde {
                             if ui.add_sized([13.0, 20.0], egui::Button::new(RichText::new(arrow).size(12.0).color(MUTED)).frame(false)).clicked() {
                                 toggle_path = Some(row.path.clone());
                             }
-                            draw_icon(ui, icons, if expanded { "folder-open" } else { "folder" }, 15.0, Color32::WHITE);
+                            draw_icon(ui, icons, if expanded { "folder-open" } else { "folder" }, icon_size, Color32::WHITE);
                         } else {
                             ui.add_space(13.0);
-                            draw_icon(ui, icons, file_icon_key_for_path(&row.path), 15.0, Color32::WHITE);
+                            draw_icon(ui, icons, file_icon_key_for_path(&row.path), icon_size, Color32::WHITE);
                         }
                         let selected = selected_file == Some(&row.path);
                         let label = ui.add_sized(
@@ -916,20 +910,20 @@ impl MinuxIde {
         ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new("HUGGING FACE INFERENCE").size(10.0).strong().color(self.accent_color()));
+        ui.label(RichText::new("DUCKDUCKGO CHAT API").size(10.0).strong().color(self.accent_color()));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             draw_icon(ui, &self.icons, "key-round", 16.0, self.accent_color());
-            ui.label(RichText::new("Access Token").size(12.0).color(TEXT));
+            ui.label(RichText::new("API-токен (необязательно)").size(12.0).color(TEXT));
         });
         ui.add_sized(
             [ui.available_width().min(460.0), 34.0],
             egui::TextEdit::singleline(&mut self.api_key)
                 .password(true)
-                .hint_text("hf_…"),
+                .hint_text("Оставь пустым, если API не требует токен"),
         );
         ui.add_space(5.0);
-        ui.label(RichText::new("Токен хранится локально в settings.json без шифрования. Не публикуй этот файл.").size(10.0).color(ORANGE));
+        ui.label(RichText::new("Запросы отправляются на duckduckgo.com/duckduckgo-html-api/v1/chat/completions. Токен необязателен; введённый токен хранится локально без шифрования.").size(10.0).color(ORANGE));
         ui.add_space(16.0);
         ui.separator();
         ui.label(RichText::new("ОФОРМЛЕНИЕ").size(10.0).strong().color(self.accent_color()));
@@ -955,9 +949,11 @@ impl MinuxIde {
             ui.label(RichText::new(&self.custom_accent).monospace().size(10.0).color(MUTED));
         });
         ui.add(egui::Slider::new(&mut self.corner_radius, 3..=14).text("Закругление"));
-        ui.add(egui::Slider::new(&mut self.editor_font_size, 11.0..=20.0).step_by(0.5).text("Размер шрифта"));
+        ui.add(egui::Slider::new(&mut self.editor_font_size, 11.0..=30.0).step_by(0.5).text("Размер шрифта редактора"));
         ui.add(egui::Slider::new(&mut self.animation_speed, 0.5..=2.0).step_by(0.1).text("Скорость переходов"));
-        ui.add(egui::Slider::new(&mut self.ui_scale, 0.85..=1.25).step_by(0.05).text("Масштаб интерфейса"));
+        ui.add(egui::Slider::new(&mut self.ui_scale, 0.75..=1.50).step_by(0.05).text("Масштаб интерфейса"));
+        ui.add(egui::Slider::new(&mut self.sidebar_width, 220.0..=420.0).step_by(10.0).text("Ширина боковой панели"));
+        ui.add(egui::Slider::new(&mut self.icon_size, 14.0..=28.0).step_by(1.0).text("Размер иконок"));
         ui.checkbox(&mut self.animations_enabled, "Анимации панелей");
         ui.add_space(12.0);
         ui.separator();
@@ -976,7 +972,7 @@ impl MinuxIde {
                 egui::TextEdit::singleline(&mut self.model)
                     .hint_text("Организация/имя-модели"),
             );
-            egui::ComboBox::from_id_salt("hf_model_selector")
+            egui::ComboBox::from_id_salt("duckduckgo_model_selector")
                 .selected_text("Модели ▾")
                 .width(140.0)
                 .show_ui(ui, |ui| {
@@ -988,10 +984,10 @@ impl MinuxIde {
         ui.add_space(5.0);
         ui.horizontal(|ui| {
             draw_icon(ui, &self.icons, "cloud-download", 16.0, self.accent_color());
-            if ui.add_enabled(!self.models_loading, egui::Button::new(if self.models_loading { "Загрузка…" } else { "Загрузить доступные модели" })).clicked() {
-                self.fetch_huggingface_models();
+            if ui.add_enabled(!self.models_loading, egui::Button::new(if self.models_loading { "Загрузка…" } else { "Обновить каталог моделей" })).clicked() {
+                self.fetch_endpoint_models();
             }
-            ui.label(RichText::new(format!("{} моделей", self.available_models.len())).size(10.0).color(MUTED));
+            ui.label(RichText::new(format!("{} вариантов", model_options.len())).size(10.0).color(MUTED));
         });
         ui.add_space(11.0);
 
@@ -1002,7 +998,7 @@ impl MinuxIde {
         ui.checkbox(&mut self.thinking_enabled, "Thinking / extended reasoning (если поддерживается моделью)");
         ui.horizontal(|ui| {
             ui.label(RichText::new("Максимум токенов ответа").size(11.0).color(MUTED));
-            egui::ComboBox::from_id_salt("hf_max_tokens")
+            egui::ComboBox::from_id_salt("duckduckgo_max_tokens")
                 .selected_text(self.max_tokens.to_string())
                 .show_ui(ui, |ui| {
                     for size in [512u32, 1024, 2048, 4096, 8192] {
@@ -1015,8 +1011,8 @@ impl MinuxIde {
             if ui.button("Сохранить настройки").clicked() {
                 self.save_ai_settings();
             }
-            if ui.button("Проверить токен и модели").clicked() {
-                self.fetch_huggingface_models();
+            if ui.button("Проверить связь / обновить модели").clicked() {
+                self.fetch_endpoint_models();
             }
             if ui.button(if self.show_home { "Сначала выбери проект" } else { "Открыть AI-панель" }).clicked() {
                 self.settings_open = false;
@@ -1037,6 +1033,7 @@ impl MinuxIde {
         settings_row(ui, "Syntax highlighting", "Syntect", GREEN);
         settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native C core", &format!("C · v{}", unsafe { minux_engine_version() }), GREEN);
+        settings_row(ui, "AI endpoint", "DuckDuckGo HTML Chat API", GREEN);
         settings_row(ui, "Runtime", "TypeScript · JS · Python · Shell · C · Make · XSLT", GREEN);
         ui.add_space(8.0);
         ui.label(RichText::new("Файловая структура сканируется в отдельном потоке; отображение дерева виртуализировано.").size(11.0).color(MUTED));
@@ -1239,7 +1236,7 @@ impl eframe::App for MinuxIde {
                         Ok(models) => {
                             let count = models.len();
                             self.available_models = models;
-                            self.status = format!("Hugging Face: загружено моделей — {count}");
+                            self.status = format!("DuckDuckGo Chat API: загружено моделей — {count}");
                         }
                         Err(error) => self.status = error,
                     }
@@ -1276,7 +1273,7 @@ impl eframe::App for MinuxIde {
             self.settings_open = false;
         }
 
-        ctx.set_zoom_factor(self.ui_scale.clamp(0.85, 1.25));
+        ctx.set_zoom_factor(self.ui_scale.clamp(0.75, 1.50));
         apply_theme(ctx, self.accent_color(), self.accent_background(), self.corner_radius);
 
         let view_progress = if self.animations_enabled {
@@ -1372,37 +1369,64 @@ impl eframe::App for MinuxIde {
             .frame(egui::Frame::new().fill(RAIL_BG).stroke(Stroke::new(1.0_f32, BORDER)))
             .show(ctx, |ui| {
                 ui.add_space(10.0);
-                if activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник") .clicked() {
+                if activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник", self.icon_size) .clicked() {
+                    self.sidebar_transition_state = !self.sidebar_transition_state;
                     self.sidebar_view = SidebarView::Explorer;
                     self.settings_open = false;
                 }
-                if activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов") .clicked() {
+                if activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов", self.icon_size) .clicked() {
+                    self.sidebar_transition_state = !self.sidebar_transition_state;
                     self.sidebar_view = SidebarView::Search;
                     self.settings_open = false;
                 }
-                if activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики") .clicked() {
+                if activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики", self.icon_size) .clicked() {
+                    self.sidebar_transition_state = !self.sidebar_transition_state;
                     self.sidebar_view = SidebarView::Extensions;
                     self.settings_open = false;
                 }
                 ui.add_space(7.0);
-                if activity_button(ui, &self.icons, "bot", self.show_ai, "AI Agent") .clicked() {
+                if activity_button(ui, &self.icons, "bot", self.show_ai, "AI Agent", self.icon_size) .clicked() {
                     self.show_ai = !self.show_ai;
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    if activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки") .clicked() {
+                    if activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки", self.icon_size) .clicked() {
+                        self.sidebar_transition_state = !self.sidebar_transition_state;
                         self.settings_open = !self.settings_open;
                     }
                     ui.add_space(6.0);
                 });
             });
 
+        let sidebar_transition = if self.animations_enabled {
+            let duration = 0.24 / self.animation_speed.clamp(0.5, 2.0);
+            let raw = ctx.animate_bool_with_time(
+                egui::Id::new("minux-left-sidebar-page-transition"),
+                self.sidebar_transition_state,
+                duration,
+            );
+            if self.sidebar_transition_state {
+                unsafe { minux_ease_out_quint(raw) }
+            } else {
+                unsafe { minux_ease_out_quint(1.0 - raw) }
+            }
+        } else {
+            1.0
+        };
+        if self.animations_enabled && sidebar_transition < 0.999 {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
         egui::SidePanel::left("workspace_sidebar")
-            .default_width(238.0)
-            .min_width(210.0)
-            .max_width(320.0)
-            .resizable(true)
-            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
-            .show(ctx, |ui| self.draw_sidebar(ui));
+            .exact_width((self.sidebar_width.clamp(220.0, 420.0) * sidebar_transition).max(8.0))
+            .resizable(false)
+            .frame(egui::Frame::new()
+                .fill(PANEL.gamma_multiply(sidebar_transition.clamp(0.02, 1.0)))
+                .stroke(Stroke::new(1.0_f32, BORDER))
+                .inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
+            .show(ctx, |ui| {
+                if sidebar_transition > 0.45 {
+                    self.draw_sidebar(ui);
+                }
+            });
 
         let ai_panel_progress = if self.animations_enabled {
             let duration = 0.30 / self.animation_speed.clamp(0.5, 2.0);
@@ -1468,8 +1492,10 @@ fn activity_button(
     icon_name: &str,
     selected: bool,
     tooltip: &str,
+    icon_size: f32,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(40.0, 38.0), egui::Sense::click());
+    let button_size = ui.available_width().min(46.0).max(38.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
     let hover_t = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
@@ -1481,7 +1507,8 @@ fn activity_button(
         let marker = egui::Rect::from_min_size(rect.left_top(), egui::vec2(2.0, rect.height()));
         ui.painter().rect_filled(marker, egui::CornerRadius::same(1), accent);
     }
-    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(20.0, 20.0));
+    let icon_extent = icon_size.clamp(14.0, 28.0).min(rect.width() - 10.0);
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_extent, icon_extent));
     paint_icon_at(ui, icons, icon_name, icon_rect, if selected { accent } else { MUTED });
     response.on_hover_text(tooltip)
 }
