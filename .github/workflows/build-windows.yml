@@ -1,8 +1,6 @@
 name: Build MINUX IDE (Windows)
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 permissions:

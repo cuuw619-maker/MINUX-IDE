@@ -225,8 +225,7 @@ impl eframe::App for MinuxIde {
                     ui.label(path.to_string_lossy());
                     ui.separator();
 
-                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
-                        let source = text.as_str();
+                    let mut layouter = |ui: &egui::Ui, source: &str, wrap_width: f32| {
                         let mut job = egui::text::LayoutJob::default();
                         for line in source.split_inclusive('\n') {
                             let trimmed = line.trim_start();
