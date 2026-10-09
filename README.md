@@ -24,7 +24,7 @@ GitHub Actions is **manual-only**. Start it from the Actions page with **Run wor
 2. Select a model from the picker or enter a Hugging Face repository ID in `owner/model` form.
 3. Save settings and open the Agent panel.
 
-The client uses the OpenAI-compatible router at `https://router.huggingface.co/v1/chat/completions`. Requests run on worker threads. The model ID is validated before sending. If settings contain the previous concatenated value `zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct`, MINUX repairs it to the known `Qwen/Qwen2.5-Coder-32B-Instruct` ID. A genuine `model_not_found` error now explains that the chosen ID/provider is unavailable.
+The client uses the OpenAI-compatible router at `https://router.huggingface.co/v1/chat/completions`. Requests run on worker threads. The model ID is validated before sending. If settings contain the previous concatenated value `zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct`, MINUX strips the known appended default and preserves the valid prefix `zai-org/GLM-5.3`. If the cleaned ID is not available to Hugging Face, the agent gives a model-not-found explanation and asks you to select an ID from the available-model list. A genuine `model_not_found` error now explains that the chosen ID/provider is unavailable.
 
 The agent can list workspace files, read text files, create folders and files, and edit files. Paths are restricted to the opened project, reads/writes are limited to 2 MiB, secret files are blocked, and agent tools do not delete files or execute shell commands.
 

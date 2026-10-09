@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Output},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -26,7 +26,8 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
     let name = selected.file_name().and_then(|item| item.to_str()).unwrap_or("").to_ascii_lowercase();
 
     match extension.as_str() {
-        "js" | "mjs" | "cjs" | "jsx" => run_program("node", &[selected.as_os_str()], &root),
+        "js" | "mjs" | "cjs" => run_program("node", &[selected.as_os_str()], &root),
+        "jsx" => run_typescript(&selected, &root, true),
         "ts" => run_typescript(&selected, &root, false),
         "tsx" => run_typescript(&selected, &root, true),
         "py" | "pyw" => run_python(&selected, &root),
@@ -47,7 +48,7 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
 
 fn run_typescript(file: &Path, root: &Path, jsx: bool) -> Result<String, String> {
     if jsx {
-        return run_program("npx", &[std::ffi::OsStr::new("--no-install"), std::ffi::OsStr::new("tsx"), file.as_os_str()], root);
+        return run_with_tsx(file, root);
     }
     let args = [std::ffi::OsStr::new("--experimental-strip-types"), file.as_os_str()];
     match output("node", &args, root) {
@@ -58,16 +59,24 @@ fn run_typescript(file: &Path, root: &Path, jsx: bool) -> Result<String, String>
                 || detail.to_ascii_lowercase().contains("strip-types")
                 || detail.to_ascii_lowercase().contains("experimental-strip-types")
             {
-                run_program("npx", &[std::ffi::OsStr::new("--no-install"), std::ffi::OsStr::new("tsx"), file.as_os_str()], root)
+                run_with_tsx(file, root)
             } else {
                 Err(detail)
             }
         }
         Err(error) if (error.to_ascii_lowercase().contains("not found") || error.to_ascii_lowercase().contains("не найдена")) => {
-            run_program("npx", &[std::ffi::OsStr::new("--no-install"), std::ffi::OsStr::new("tsx"), file.as_os_str()], root)
+            run_with_tsx(file, root)
         }
         Err(error) => Err(error),
     }
+}
+
+fn run_with_tsx(file: &Path, root: &Path) -> Result<String, String> {
+    let entry = root.join("node_modules").join("tsx").join("dist").join("cli.mjs");
+    if !entry.is_file() {
+        return Err("Для TSX/JSX или Node без поддержки type stripping установи зависимости проекта: npm install".into());
+    }
+    run_program("node", &[entry.as_os_str(), file.as_os_str()], root)
 }
 
 fn run_python(file: &Path, root: &Path) -> Result<String, String> {
@@ -76,7 +85,8 @@ fn run_python(file: &Path, root: &Path) -> Result<String, String> {
 }
 
 fn run_make(file: &Path, root: &Path) -> Result<String, String> {
-    run_program("make", &[std::ffi::OsStr::new("-f"), file.as_os_str()], root)
+    let working_directory = file.parent().unwrap_or(root);
+    run_program("make", &[std::ffi::OsStr::new("-f"), file.as_os_str()], working_directory)
 }
 
 fn run_c(file: &Path, root: &Path) -> Result<String, String> {
@@ -97,7 +107,9 @@ fn run_c(file: &Path, root: &Path) -> Result<String, String> {
         let detail = format_output(compile_output);
         return Err(format!("Ошибка компиляции C:\n{detail}"));
     }
-    let execution = output(binary.as_os_str(), &[], root)
+    let execution = Command::new(&binary)
+        .current_dir(root)
+        .output()
         .map_err(|e| format!("Сборка C успешна, но файл не запустился: {e}"));
     let _ = fs::remove_file(&binary);
     execution.and_then(|result| {

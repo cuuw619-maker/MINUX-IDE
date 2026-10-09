@@ -18,6 +18,12 @@ export function isValidModelId(value: string): boolean {
 export function normalizeModelId(input: string): string {
   const value = input.trim().replace(/^['"`]|['"`]$/g, "");
   if (isValidModelId(value)) return value;
+  for (const candidate of suggestedModelIds) {
+    if (value.endsWith(candidate)) {
+      const prefix = value.slice(0, value.length - candidate.length).trim();
+      if (isValidModelId(prefix)) return prefix;
+    }
+  }
   const matches = suggestedModelIds.filter((candidate) => value.includes(candidate));
   if (matches.length === 1) return matches[0];
   throw new Error("Model ID must use owner/model format; choose a model from the list.");

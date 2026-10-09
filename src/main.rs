@@ -193,7 +193,7 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
 }
 
 fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::TextureHandle> {
-    let assets: [(&'static str, &'static str); 30] = [
+    let assets: [(&'static str, &'static str); 31] = [
         ("file-code", include_str!("../assets/icons/file-code.svg")),
         ("file-text", include_str!("../assets/icons/file-text.svg")),
         ("folder", include_str!("../assets/icons/folder.svg")),
@@ -377,6 +377,8 @@ impl MinuxIde {
             }
             ui.add_space(12.0);
             ui.label(RichText::new("TypeScript · JavaScript · Python · Shell · C · Make · XSLT").size(11.0).color(MUTED));
+            ui.add_space(10.0);
+            ui.label(RichText::new(&self.status).size(10.5).color(MUTED));
         });
     }
 
@@ -480,7 +482,7 @@ impl MinuxIde {
         });
     }
 
-    fn send_agent_prompt(&mut self, prompt: String) {    fn send_agent_prompt(&mut self, prompt: String) {
+    fn send_agent_prompt(&mut self, prompt: String) {
         if self.ai_pending || prompt.trim().is_empty() {
             return;
         }
@@ -948,9 +950,13 @@ impl MinuxIde {
             if ui.button("Проверить токен и модели").clicked() {
                 self.fetch_huggingface_models();
             }
-            if ui.button("Открыть AI-панель").clicked() {
-                self.show_ai = true;
+            if ui.button(if self.show_home { "Сначала выбери проект" } else { "Открыть AI-панель" }).clicked() {
                 self.settings_open = false;
+                if self.show_home {
+                    self.status = "Сначала выбери проект на начальном экране.".into();
+                } else {
+                    self.show_ai = true;
+                }
             }
         });
         ui.add_space(8.0);
@@ -1208,12 +1214,11 @@ impl eframe::App for MinuxIde {
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(BG))
                 .show(ctx, |ui| self.draw_home(ui));
-            if self.animations_enabled { ctx.request_repaint_after(Duration::from_millis(60)); }
             return;
         }
 
         egui::TopBottomPanel::top("main_toolbar")
-            .exact_height(46.0)
+            .exact_height(48.0)
             .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0, BORDER)))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {

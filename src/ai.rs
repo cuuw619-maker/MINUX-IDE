@@ -109,6 +109,17 @@ pub fn normalize_model_id(input: &str) -> Result<String, String> {
         return Ok(value.to_owned());
     }
 
+    // Older settings could append the default model ID to a user selection.
+    // Preserve the valid model prefix before that known default suffix.
+    for candidate in suggested_models() {
+        if let Some(prefix) = value.strip_suffix(candidate) {
+            let prefix = prefix.trim();
+            if c_model_id_is_valid(prefix) {
+                return Ok(prefix.to_owned());
+            }
+        }
+    }
+
     let matches: Vec<&str> = suggested_models()
         .iter()
         .copied()
@@ -642,7 +653,7 @@ mod model_id_tests {
     fn repairs_concatenated_legacy_model_id() {
         assert_eq!(
             normalize_model_id("zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct").unwrap(),
-            "Qwen/Qwen2.5-Coder-32B-Instruct"
+            "zai-org/GLM-5.3"
         );
     }
 
