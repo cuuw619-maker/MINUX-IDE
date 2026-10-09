@@ -6,6 +6,7 @@ unsafe extern "C" {
 }
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -116,6 +117,9 @@ struct MinuxIde {
     status: String,
     api_key: String,
     model: String,
+    icons: HashMap<&'static str, egui::TextureHandle>,
+    icons_loaded: bool,
+    code_theme: egui_extras::syntax_highlighting::CodeTheme,
 }
 
 impl Default for MinuxIde {
@@ -137,6 +141,9 @@ impl Default for MinuxIde {
             status: "Готово".into(),
             api_key: String::new(),
             model: "Не подключена".into(),
+            icons: HashMap::new(),
+            icons_loaded: false,
+            code_theme: egui_extras::syntax_highlighting::CodeTheme::dark(13.5),
         }
     }
 }
@@ -170,6 +177,93 @@ fn apply_theme(ctx: &egui::Context) {
     visuals.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
     style.visuals = visuals;
     ctx.set_style(style);
+}
+
+fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::TextureHandle> {
+    let assets: [(&'static str, &'static str); 24] = [
+        ("file-code", include_str!("../assets/icons/file-code.svg")),
+        ("file-text", include_str!("../assets/icons/file-text.svg")),
+        ("folder", include_str!("../assets/icons/folder.svg")),
+        ("folder-open", include_str!("../assets/icons/folder-open.svg")),
+        ("search", include_str!("../assets/icons/search.svg")),
+        ("puzzle", include_str!("../assets/icons/puzzle.svg")),
+        ("bot", include_str!("../assets/icons/bot.svg")),
+        ("settings-2", include_str!("../assets/icons/settings-2.svg")),
+        ("save", include_str!("../assets/icons/save.svg")),
+        ("terminal", include_str!("../assets/icons/terminal.svg")),
+        ("git-branch", include_str!("../assets/icons/git-branch.svg")),
+        ("lang-rust", include_str!("../assets/icons/lang-rust.svg")),
+        ("lang-typescript", include_str!("../assets/icons/lang-typescript.svg")),
+        ("lang-javascript", include_str!("../assets/icons/lang-javascript.svg")),
+        ("lang-python", include_str!("../assets/icons/lang-python.svg")),
+        ("lang-c", include_str!("../assets/icons/lang-c.svg")),
+        ("lang-cplusplus", include_str!("../assets/icons/lang-cplusplus.svg")),
+        ("lang-csharp", include_str!("../assets/icons/lang-csharp.svg")),
+        ("lang-bash", include_str!("../assets/icons/lang-bash.svg")),
+        ("lang-xml", include_str!("../assets/icons/lang-xml.svg")),
+        ("lang-html5", include_str!("../assets/icons/lang-html5.svg")),
+        ("lang-json", include_str!("../assets/icons/lang-json.svg")),
+        ("lang-make", include_str!("../assets/icons/lang-make.svg")),
+        ("lang-css3", include_str!("../assets/icons/lang-css3.svg")),
+    ];
+    let mut icons = HashMap::with_capacity(assets.len() + 1);
+    for (name, svg) in assets.into_iter().chain([("lang-yaml", include_str!("../assets/icons/lang-yaml.svg"))]) {
+        match egui_extras::image::load_svg_bytes(svg.as_bytes()) {
+            Ok(image) => {
+                icons.insert(name, ctx.load_texture(name, image, egui::TextureOptions::LINEAR));
+            }
+            Err(error) => eprintln!("MINUX IDE: icon {name} could not be loaded: {error}"),
+        }
+    }
+    icons
+}
+
+fn paint_icon_at(
+    ui: &egui::Ui,
+    icons: &HashMap<&'static str, egui::TextureHandle>,
+    name: &str,
+    rect: egui::Rect,
+    tint: Color32,
+) {
+    if let Some(texture) = icons.get(name) {
+        ui.painter().image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            tint,
+        );
+    }
+}
+
+fn draw_icon(
+    ui: &mut egui::Ui,
+    icons: &HashMap<&'static str, egui::TextureHandle>,
+    name: &str,
+    size: f32,
+    tint: Color32,
+) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    paint_icon_at(ui, icons, name, rect, tint);
+}
+
+fn toolbar_icon_button(
+    ui: &mut egui::Ui,
+    icons: &HashMap<&'static str, egui::TextureHandle>,
+    name: &str,
+    selected: bool,
+    tooltip: &str,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 31.0), egui::Sense::click());
+    if selected || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            egui::CornerRadius::same(5),
+            if selected { ACCENT_BG } else { PANEL_RAISED },
+        );
+    }
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(18.0, 18.0));
+    paint_icon_at(ui, icons, name, icon_rect, if selected { ACCENT } else { MUTED });
+    response.on_hover_text(tooltip)
 }
 
 impl MinuxIde {
@@ -233,16 +327,23 @@ impl MinuxIde {
             }
 
             if path.is_dir() {
-                egui::CollapsingHeader::new(RichText::new(name).size(12.0).color(TEXT))
-                    .id_salt(path.to_string_lossy().to_string())
-                    .default_open(depth == 0)
-                    .show(ui, |ui| self.draw_tree(ui, &path, depth + 1));
+                let response = egui::CollapsingHeader::new(
+                    RichText::new(format!("      {name}")).size(12.0).color(TEXT),
+                )
+                .id_salt(path.to_string_lossy().to_string())
+                .default_open(depth == 0)
+                .show(ui, |ui| self.draw_tree(ui, &path, depth + 1));
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(response.header_response.rect.left() + 27.0, response.header_response.rect.center().y),
+                    egui::vec2(14.0, 14.0),
+                );
+                paint_icon_at(ui, &self.icons, "folder", icon_rect, Color32::WHITE);
             } else {
                 let selected = self.selected_file.as_ref() == Some(&path);
                 ui.horizontal(|ui| {
                     ui.add_space(7.0);
-                    ui.label(RichText::new(file_badge(&path)).size(9.0).monospace().color(file_color(&path)));
-                    if ui.selectable_label(selected, RichText::new(name).size(12.0).color(if selected { TEXT } else { MUTED })).clicked() {
+                    draw_icon(ui, &self.icons, file_icon_key_for_path(&path), 16.0, Color32::WHITE);
+                    if ui.selectable_label(selected, RichText::new(name.clone()).size(12.0).color(if selected { TEXT } else { MUTED })).clicked() {
                         self.open_file(path.clone());
                     }
                 });
@@ -264,7 +365,7 @@ impl MinuxIde {
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("▾").color(ACCENT));
+                    draw_icon(ui, &self.icons, "folder-open", 16.0, Color32::WHITE);
                     ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).strong().size(12.0));
                 });
                 ui.separator();
@@ -274,7 +375,10 @@ impl MinuxIde {
                 });
             }
             SidebarView::Search => {
-                ui.label(RichText::new("ПОИСК ФАЙЛОВ").size(10.0).strong().color(MUTED));
+                ui.horizontal(|ui| {
+                    draw_icon(ui, &self.icons, "search", 15.0, MUTED);
+                    ui.label(RichText::new("ПОИСК ФАЙЛОВ").size(10.0).strong().color(MUTED));
+                });
                 ui.add_space(8.0);
                 ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Имя файла...").desired_width(f32::INFINITY));
                 ui.add_space(8.0);
@@ -288,7 +392,7 @@ impl MinuxIde {
                         for path in matches {
                             let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(file_badge(&path)).size(9.0).monospace().color(file_color(&path)));
+                                draw_icon(ui, &self.icons, file_icon_key_for_path(&path), 16.0, Color32::WHITE);
                                 if ui.selectable_label(false, RichText::new(name).size(12.0)).clicked() {
                                     self.open_file(path.clone());
                                 }
@@ -298,11 +402,32 @@ impl MinuxIde {
                 }
             }
             SidebarView::Extensions => {
-                ui.label(RichText::new("РАСШИРЕНИЯ").size(10.0).strong().color(MUTED));
-                ui.add_space(12.0);
-                ui.label(RichText::new("Каталог расширений").strong());
-                ui.add_space(4.0);
-                ui.label(RichText::new("Поддержка расширений ещё не подключена.").size(11.0).color(MUTED));
+                ui.label(RichText::new("ЯЗЫКИ И ГРАММАТИКИ").size(10.0).strong().color(MUTED));
+                ui.add_space(8.0);
+                ui.label(RichText::new("Подсветка Syntect · встроенные грамматики").size(10.0).color(MUTED));
+                ui.separator();
+                for (icon, label) in [
+                    ("lang-rust", "Rust"),
+                    ("lang-typescript", "TypeScript / TSX"),
+                    ("lang-javascript", "JavaScript / JSX"),
+                    ("lang-python", "Python"),
+                    ("lang-c", "C"),
+                    ("lang-cplusplus", "C / C++ headers"),
+                    ("lang-csharp", "C#"),
+                    ("lang-bash", "Shell / Bash"),
+                    ("lang-xml", "XML / XSL / XSLT"),
+                    ("lang-make", "Makefile / GNU Make"),
+                    ("lang-html5", "HTML"),
+                    ("lang-css3", "CSS"),
+                    ("lang-json", "JSON"),
+                    ("lang-yaml", "YAML"),
+                ] {
+                    ui.add_space(5.0);
+                    ui.horizontal(|ui| {
+                        draw_icon(ui, &self.icons, icon, 17.0, Color32::WHITE);
+                        ui.label(RichText::new(label).size(11.0).color(TEXT));
+                    });
+                }
             }
         }
         ui.add_space(8.0);
@@ -388,8 +513,13 @@ impl MinuxIde {
         ui.add_space(12.0);
         ui.label(RichText::new("КОМПОНЕНТЫ").size(10.0).strong().color(ACCENT));
         settings_row(ui, "UI / Core", "Rust · egui", GREEN);
+        settings_row(ui, "Syntax highlighting", "egui_extras + Syntect", GREEN);
+        settings_row(ui, "SVG rendering", "resvg", GREEN);
+        settings_row(ui, "Icon assets", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native Engine", &format!("C++ · v{}", unsafe { minux_engine_version() }), GREEN);
         settings_row(ui, "Agent", &format!("C# NativeAOT · v{}", agent_version()), GREEN);
+        ui.add_space(8.0);
+        ui.label(RichText::new("Языки: Rust, TS/TSX, JS/JSX, Python, C/C++, C#, Shell, XML/XSLT, Makefile, HTML, CSS, JSON, YAML.").size(11.0).color(MUTED));
         ui.add_space(16.0);
         if ui.button("← Вернуться в редактор").clicked() {
             self.settings_open = false;
@@ -431,7 +561,7 @@ impl MinuxIde {
         ui.horizontal(|ui| {
             if let Some(path) = self.selected_file.clone() {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
-                ui.label(RichText::new(file_badge(&path)).size(10.0).monospace().color(file_color(&path)));
+                draw_icon(ui, &self.icons, file_icon_key_for_path(&path), 17.0, Color32::WHITE);
                 ui.label(RichText::new(name).size(12.0).color(TEXT));
                 if self.dirty {
                     ui.label(RichText::new("●").color(ORANGE).size(9.0));
@@ -461,26 +591,16 @@ impl MinuxIde {
             });
             ui.add_space(5.0);
 
-            let mut layouter = |ui: &egui::Ui, source: &str, wrap_width: f32| {
-                let mut job = egui::text::LayoutJob::default();
-                for line in source.split_inclusive('\n') {
-                    let trimmed = line.trim_start();
-                    let color = if trimmed.starts_with("//") || trimmed.starts_with('#') {
-                        GREEN
-                    } else if ["fn ", "pub ", "use ", "let ", "struct ", "impl ", "class ", "using ", "return ", "if ", "else", "import ", "def ", "mod ", "enum ", "match "]
-                        .iter().any(|kw| trimmed.starts_with(kw)) {
-                        Color32::from_rgb(126, 169, 255)
-                    } else if trimmed.contains("= ") || trimmed.contains("=>") || trimmed.contains("::") {
-                        ORANGE
-                    } else {
-                        ui.visuals().text_color()
-                    };
-                    job.append(line, 0.0, egui::TextFormat {
-                        font_id: egui::FontId::monospace(13.5),
-                        color,
-                        ..Default::default()
-                    });
-                }
+            let code_theme = self.code_theme.clone();
+            let syntax = syntax_selector_for_path(&path).to_string();
+            let mut layouter = move |ui: &egui::Ui, source: &str, wrap_width: f32| {
+                let mut job = egui_extras::syntax_highlighting::highlight(
+                    ui.ctx(),
+                    ui.style(),
+                    &code_theme,
+                    source,
+                    &syntax,
+                );
                 job.wrap.max_width = wrap_width;
                 ui.fonts(|fonts| fonts.layout_job(job))
             };
@@ -522,6 +642,10 @@ impl MinuxIde {
 
 impl eframe::App for MinuxIde {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.icons_loaded {
+            self.icons = load_icon_textures(ctx);
+            self.icons_loaded = true;
+        }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
             self.save_file();
         }
@@ -558,13 +682,13 @@ impl eframe::App for MinuxIde {
                             self.settings_open = false;
                         }
                     }
-                    if ui.button("Открыть проект").clicked() {
+                    if toolbar_icon_button(ui, &self.icons, "folder-open", false, "Открыть проект").clicked() {
                         self.open_workspace();
                     }
-                    if ui.button("Сохранить").clicked() {
+                    if toolbar_icon_button(ui, &self.icons, "save", false, "Сохранить файл").clicked() {
                         self.save_file();
                     }
-                    if ui.button(RichText::new(if self.show_ai { "AI  ✓" } else { "AI  +" }).color(ACCENT)).clicked() {
+                    if toolbar_icon_button(ui, &self.icons, "bot", self.show_ai, "AI Agent").clicked() {
                         self.show_ai = !self.show_ai;
                     }
                 });
@@ -578,13 +702,16 @@ impl eframe::App for MinuxIde {
                     ui.label(RichText::new("◆").size(10.0).color(ACCENT));
                     ui.label(RichText::new(self.status.clone()).size(10.0).color(TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button(if self.show_output { "Скрыть вывод" } else { "Вывод" }).clicked() {
+                        if toolbar_icon_button(ui, &self.icons, "terminal", self.show_output, if self.show_output { "Скрыть вывод" } else { "Показать вывод" }).clicked() {
                             self.show_output = !self.show_output;
                         }
+                        draw_icon(ui, &self.icons, "git-branch", 13.0, Color32::WHITE);
                         ui.label(RichText::new(format!("C# {} · C++ {}", agent_version(), unsafe { minux_engine_version() })).size(10.0).color(TEXT));
                         if let Some(path) = &self.selected_file {
                             ui.separator();
                             ui.label(RichText::new(path.extension().and_then(|s| s.to_str()).unwrap_or("text").to_uppercase()).size(10.0).color(TEXT));
+                            ui.separator();
+                            ui.label(RichText::new(language_display_name(&path)).size(10.0).color(TEXT));
                             ui.separator();
                             ui.label(RichText::new(format!("{} строк", self.editor_text.lines().count().max(1))).size(10.0).color(TEXT));
                         }
@@ -598,24 +725,24 @@ impl eframe::App for MinuxIde {
             .frame(egui::Frame::new().fill(RAIL_BG).stroke(Stroke::new(1.0, BORDER)))
             .show(ctx, |ui| {
                 ui.add_space(10.0);
-                if activity_button(ui, "EX", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник") .clicked() {
+                if activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник") .clicked() {
                     self.sidebar_view = SidebarView::Explorer;
                     self.settings_open = false;
                 }
-                if activity_button(ui, "⌕", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов") .clicked() {
+                if activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов") .clicked() {
                     self.sidebar_view = SidebarView::Search;
                     self.settings_open = false;
                 }
-                if activity_button(ui, "EXT", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Расширения") .clicked() {
+                if activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики") .clicked() {
                     self.sidebar_view = SidebarView::Extensions;
                     self.settings_open = false;
                 }
                 ui.add_space(7.0);
-                if activity_button(ui, "AI", self.show_ai, "AI Agent") .clicked() {
+                if activity_button(ui, &self.icons, "bot", self.show_ai, "AI Agent") .clicked() {
                     self.show_ai = !self.show_ai;
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    if activity_button(ui, "CFG", self.settings_open, "Настройки") .clicked() {
+                    if activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки") .clicked() {
                         self.settings_open = !self.settings_open;
                     }
                     ui.add_space(6.0);
@@ -664,14 +791,28 @@ impl eframe::App for MinuxIde {
     }
 }
 
-fn activity_button(ui: &mut egui::Ui, label: &str, selected: bool, tooltip: &str) -> egui::Response {
-    let text_color = if selected { ACCENT } else { MUTED };
-    ui.add_sized(
-        [40.0, 38.0],
-        egui::Button::new(RichText::new(label).size(11.0).strong().color(text_color))
-            .fill(if selected { ACCENT_BG } else { RAIL_BG })
-            .stroke(if selected { Stroke::new(1.0, ACCENT) } else { Stroke::NONE }),
-    ).on_hover_text(tooltip)
+fn activity_button(
+    ui: &mut egui::Ui,
+    icons: &HashMap<&'static str, egui::TextureHandle>,
+    icon_name: &str,
+    selected: bool,
+    tooltip: &str,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(40.0, 38.0), egui::Sense::click());
+    if selected || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            egui::CornerRadius::same(5),
+            if selected { ACCENT_BG } else { PANEL_RAISED },
+        );
+    }
+    if selected {
+        let marker = egui::Rect::from_min_size(rect.left_top(), egui::vec2(2.0, rect.height()));
+        ui.painter().rect_filled(marker, egui::CornerRadius::same(1), ACCENT);
+    }
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(20.0, 20.0));
+    paint_icon_at(ui, icons, icon_name, icon_rect, if selected { ACCENT } else { MUTED });
+    response.on_hover_text(tooltip)
 }
 
 fn settings_row(ui: &mut egui::Ui, name: &str, value: &str, status_color: Color32) {
@@ -685,37 +826,136 @@ fn settings_row(ui: &mut egui::Ui, name: &str, value: &str, status_color: Color3
     });
 }
 
-fn file_badge(path: &Path) -> &'static str {
+fn file_icon_key_for_path(path: &Path) -> &'static str {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+    if matches!(name.as_str(), "makefile" | "gnumakefile" | "cmakelists.txt")
+        || name.ends_with(".make")
+        || name.ends_with(".mak")
+    {
+        return "lang-make";
+    }
+    if matches!(name.as_str(), ".bashrc" | ".bash_profile" | ".zshrc" | ".profile") {
+        return "lang-bash";
+    }
+
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
-        "rs" => "RS",
-        "toml" => "TM",
-        "md" => "MD",
-        "json" => "JS",
-        "js" => "JS",
-        "ts" => "TS",
-        "tsx" => "TS",
-        "jsx" => "JS",
-        "py" => "PY",
-        "cs" => "CS",
-        "cpp" | "cc" | "cxx" => "C++",
-        "h" | "hpp" => "H",
-        "html" => "HT",
-        "css" => "CS",
-        "yml" | "yaml" => "YM",
-        "lock" => "LK",
-        _ => "·",
+        "rs" => "lang-rust",
+        "ts" | "tsx" => "lang-typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "lang-javascript",
+        "py" | "pyw" => "lang-python",
+        "c" => "lang-c",
+        "h" => "lang-c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" => "lang-cplusplus",
+        "cs" => "lang-csharp",
+        "sh" | "bash" | "zsh" | "fish" => "lang-bash",
+        "xml" | "xsl" | "xslt" | "xsd" | "dtd" => "lang-xml",
+        "html" | "htm" => "lang-html5",
+        "json" | "jsonc" => "lang-json",
+        "md" | "markdown" | "txt" | "log" => "file-text",
+        "css" | "scss" | "sass" => "lang-css3",
+        "yml" | "yaml" => "lang-yaml",
+        "mk" => "lang-make",
+        _ => if path.is_dir() { "folder" } else { "file-code" },
     }
 }
 
-fn file_color(path: &Path) -> Color32 {
+fn syntax_selector_for_path(path: &Path) -> &'static str {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let lower_name = name.to_ascii_lowercase();
+    if lower_name == "cmakelists.txt" {
+        return "cmake";
+    }
+    if matches!(lower_name.as_str(), "makefile" | "gnumakefile")
+        || lower_name.ends_with(".make")
+        || lower_name.ends_with(".mak")
+        || path.extension().and_then(|s| s.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("mk"))
+    {
+        return "Makefile";
+    }
+    if matches!(lower_name.as_str(), ".bashrc" | ".bash_profile" | ".zshrc" | ".profile") {
+        return "sh";
+    }
+    if lower_name == "dockerfile" {
+        return "Dockerfile";
+    }
+
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
-        "rs" => Color32::from_rgb(232, 139, 95),
-        "toml" | "json" | "yml" | "yaml" => Color32::from_rgb(230, 177, 112),
-        "md" => Color32::from_rgb(120, 179, 255),
-        "js" | "jsx" | "ts" | "tsx" => Color32::from_rgb(224, 195, 105),
-        "py" => Color32::from_rgb(118, 177, 231),
-        "cs" | "cpp" | "cc" | "cxx" | "h" | "hpp" => Color32::from_rgb(151, 159, 255),
-        _ => MUTED,
+        "rs" => "Rust",
+        "ts" | "tsx" => "TypeScript",
+        "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
+        "py" | "pyw" => "Python",
+        "c" | "h" => "C",
+        "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" => "C++",
+        "cs" => "C#",
+        "sh" | "bash" | "zsh" | "fish" => "sh",
+        "xml" | "xsl" | "xslt" | "xsd" | "dtd" => "XML",
+        "html" | "htm" => "HTML",
+        "json" | "jsonc" => "JSON",
+        "css" | "scss" | "sass" => "CSS",
+        "yml" | "yaml" => "YAML",
+        "toml" => "TOML",
+        "md" | "markdown" => "Markdown",
+        "sql" => "SQL",
+        "java" => "Java",
+        "go" => "Go",
+        "lua" => "Lua",
+        "php" => "PHP",
+        "rb" => "Ruby",
+        "swift" => "Swift",
+        "kt" | "kts" => "Kotlin",
+        "pl" | "pm" => "Perl",
+        "ps1" | "psm1" => "PowerShell",
+        "dockerfile" => "Dockerfile",
+        _ => "txt",
+    }
+}
+
+fn language_display_name(path: &Path) -> &'static str {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let lower_name = name.to_ascii_lowercase();
+    if lower_name == "cmakelists.txt" {
+        return "CMake";
+    }
+    if matches!(lower_name.as_str(), "makefile" | "gnumakefile")
+        || lower_name.ends_with(".make")
+        || lower_name.ends_with(".mak")
+        || path.extension().and_then(|s| s.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("mk"))
+    {
+        return "Makefile";
+    }
+    match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "rs" => "Rust",
+        "ts" => "TypeScript",
+        "tsx" => "TSX",
+        "js" | "mjs" | "cjs" => "JavaScript",
+        "jsx" => "JSX",
+        "py" | "pyw" => "Python",
+        "c" => "C",
+        "h" => "C Header",
+        "cc" | "cpp" | "cxx" => "C++",
+        "hpp" | "hxx" | "hh" => "C++ Header",
+        "cs" => "C#",
+        "sh" | "bash" | "zsh" | "fish" => "Shell",
+        "xml" => "XML",
+        "xsl" | "xslt" => "XSLT",
+        "xsd" => "XML Schema",
+        "html" | "htm" => "HTML",
+        "json" | "jsonc" => "JSON",
+        "css" | "scss" | "sass" => "CSS",
+        "yml" | "yaml" => "YAML",
+        "toml" => "TOML",
+        "md" | "markdown" => "Markdown",
+        "sql" => "SQL",
+        "java" => "Java",
+        "go" => "Go",
+        "lua" => "Lua",
+        "php" => "PHP",
+        "rb" => "Ruby",
+        "swift" => "Swift",
+        "kt" | "kts" => "Kotlin",
+        "pl" | "pm" => "Perl",
+        "ps1" | "psm1" => "PowerShell",
+        _ => "Text",
     }
 }
 
