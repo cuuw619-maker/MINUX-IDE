@@ -208,7 +208,7 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
 }
 
 fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::TextureHandle> {
-    let assets: [(&'static str, &'static str); 31] = [
+    let assets = [
         ("file-code", include_str!("../assets/icons/file-code.svg")),
         ("file-text", include_str!("../assets/icons/file-text.svg")),
         ("folder", include_str!("../assets/icons/folder.svg")),
@@ -240,6 +240,30 @@ fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::Textur
         ("cloud-download", include_str!("../assets/icons/cloud-download.svg")),
         ("folder-plus", include_str!("../assets/icons/folder-plus.svg")),
         ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
+        ("lang-go", include_str!("../assets/icons/lang-go.svg")),
+        ("lang-java", include_str!("../assets/icons/lang-java.svg")),
+        ("lang-php", include_str!("../assets/icons/lang-php.svg")),
+        ("lang-ruby", include_str!("../assets/icons/lang-ruby.svg")),
+        ("lang-swift", include_str!("../assets/icons/lang-swift.svg")),
+        ("lang-kotlin", include_str!("../assets/icons/lang-kotlin.svg")),
+        ("lang-lua", include_str!("../assets/icons/lang-lua.svg")),
+        ("lang-sql", include_str!("../assets/icons/lang-sql.svg")),
+        ("lang-dart", include_str!("../assets/icons/lang-dart.svg")),
+        ("lang-perl", include_str!("../assets/icons/lang-perl.svg")),
+        ("lang-r", include_str!("../assets/icons/lang-r.svg")),
+        ("lang-scala", include_str!("../assets/icons/lang-scala.svg")),
+        ("lang-haskell", include_str!("../assets/icons/lang-haskell.svg")),
+        ("lang-clojure", include_str!("../assets/icons/lang-clojure.svg")),
+        ("lang-erlang", include_str!("../assets/icons/lang-erlang.svg")),
+        ("lang-elixir", include_str!("../assets/icons/lang-elixir.svg")),
+        ("lang-vue", include_str!("../assets/icons/lang-vue.svg")),
+        ("lang-svelte", include_str!("../assets/icons/lang-svelte.svg")),
+        ("lang-docker", include_str!("../assets/icons/lang-docker.svg")),
+        ("lang-powershell", include_str!("../assets/icons/lang-powershell.svg")),
+        ("lang-graphql", include_str!("../assets/icons/lang-graphql.svg")),
+        ("lang-cmake", include_str!("../assets/icons/lang-cmake.svg")),
+        ("lang-fsharp", include_str!("../assets/icons/lang-fsharp.svg")),
+        ("lang-d", include_str!("../assets/icons/lang-d.svg")),
     ];
     let mut icons = HashMap::with_capacity(assets.len() + 1);
     for (name, svg) in assets.into_iter().chain([("lang-yaml", include_str!("../assets/icons/lang-yaml.svg"))]) {
@@ -348,54 +372,143 @@ impl MinuxIde {
             self.draw_settings(ui);
             return;
         }
+
         let recent = self.recent_workspaces.clone();
         let accent = self.accent_color();
-        ui.vertical_centered(|ui| {
-            ui.add_space((ui.available_height() * 0.10).max(28.0));
-            ui.label(RichText::new("M").size(54.0).strong().color(accent));
-            ui.add_space(2.0);
-            ui.label(RichText::new("MINUX IDE").size(28.0).strong().color(TEXT));
-            ui.add_space(7.0);
-            ui.label(RichText::new("Рабочее пространство для твоего кода").size(14.0).color(MUTED));
-            ui.add_space(26.0);
-            let button_width = 240.0_f32.min((ui.available_width() - 30.0).max(150.0) / 2.0);
-            ui.horizontal(|ui| {
-                if ui.add_sized([button_width, 46.0], egui::Button::new(RichText::new("＋  Открыть проект").size(13.0))).clicked() {
-                    self.open_workspace();
-                }
-                if ui.add_sized([button_width, 46.0], egui::Button::new(RichText::new("Настройки").size(13.0))).clicked() {
+        let available_width = ui.available_width();
+        let available_height = ui.available_height();
+        let area = ui.max_rect();
+        ui.painter().circle_filled(
+            egui::pos2(area.right() - 90.0, area.top() + 90.0),
+            210.0,
+            accent.gamma_multiply(0.07),
+        );
+        ui.painter().circle_filled(
+            egui::pos2(area.left() + 60.0, area.bottom() - 50.0),
+            150.0,
+            accent.gamma_multiply(0.035),
+        );
+
+        ui.add_space((available_height * 0.045).clamp(16.0, 38.0));
+        ui.horizontal(|ui| {
+            draw_icon(ui, &self.icons, "folder-open", 18.0, accent);
+            ui.label(RichText::new("MINUX  /  WORKSPACE").size(11.0).strong().color(MUTED));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки").clicked() {
                     self.settings_open = true;
                 }
             });
-            ui.add_space(28.0);
-            ui.set_min_width(520.0_f32.min(ui.available_width()));
-            ui.label(RichText::new("ПОСЛЕДНИЕ ПРОЕКТЫ").size(10.0).strong().color(MUTED));
-            ui.add_space(8.0);
-            if recent.is_empty() {
-                ui.label(RichText::new("Здесь появятся папки, которые ты открывал.").size(11.0).color(MUTED));
-            } else {
-                egui::ScrollArea::vertical()
-                    .max_height((ui.available_height() - 20.0).max(100.0))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for path in &recent {
-                            let label = Path::new(path).file_name()
-                                .map(|name| name.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| path.clone());
+        });
+        ui.add_space(12.0);
+
+        egui::Frame::new()
+            .fill(PANEL)
+            .stroke(Stroke::new(1.0_f32, BORDER))
+            .inner_margin(egui::Margin::same(24))
+            .show(ui, |ui| {
+                ui.set_min_width((available_width - 4.0).max(300.0));
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("YOUR NEXT").size(10.0).strong().color(accent));
+                        ui.add_space(5.0);
+                        ui.label(RichText::new("Большие идеи.\nЧистый код.").size(30.0).strong().color(TEXT));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Открой проект и продолжай работу с привычными языками, инструментами и AI-агентом.").size(13.0).color(MUTED));
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
                             if ui.add_sized(
-                                [ui.available_width().min(540.0), 36.0],
-                                egui::Button::new(RichText::new(format!("{label}    ·    {path}")).size(11.5)).frame(true),
+                                [210.0, 44.0],
+                                egui::Button::new(RichText::new("＋   Открыть проект").size(13.0).strong()),
                             ).clicked() {
-                                self.open_recent_workspace(path);
+                                self.open_workspace();
                             }
+                            if ui.add_sized(
+                                [142.0, 44.0],
+                                egui::Button::new(RichText::new("Настройки").size(12.0)),
+                            ).clicked() {
+                                self.settings_open = true;
+                            }
+                        });
+                    });
+                    ui.add_space(22.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.vertical_centered(|ui| {
+                            draw_icon(ui, &self.icons, "brain", 76.0, accent);
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("MINUX IDE").size(19.0).strong().color(TEXT));
+                            ui.label(RichText::new("NATIVE · POLYGLOT · AI").size(9.0).color(MUTED));
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("C  /  Rust  /  TypeScript").size(10.0).color(accent));
+                        });
+                    });
+                });
+            });
+
+        ui.add_space(18.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("ПОСЛЕДНИЕ ПРОЕКТЫ").size(10.0).strong().color(MUTED));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(RichText::new(format!("{} недавних", recent.len())).size(10.0).color(MUTED));
+            });
+        });
+        ui.add_space(8.0);
+
+        if recent.is_empty() {
+            egui::Frame::new()
+                .fill(PANEL.gamma_multiply(0.75))
+                .stroke(Stroke::new(1.0_f32, BORDER))
+                .inner_margin(egui::Margin::same(20))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        draw_icon(ui, &self.icons, "folder-plus", 34.0, accent);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Здесь пока пусто").size(15.0).strong().color(TEXT));
+                            ui.label(RichText::new("Открой папку проекта — она появится в этом списке.").size(11.0).color(MUTED));
+                        });
+                    });
+                });
+        } else {
+            egui::ScrollArea::vertical()
+                .max_height((available_height * 0.36).clamp(110.0, 300.0))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for path in &recent {
+                        let label = Path::new(path).file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.clone());
+                        let response = ui.add_sized(
+                            [ui.available_width().min(940.0), 44.0],
+                            egui::Button::new(RichText::new(format!("▸   {label}     ·     {path}")).size(11.5)).frame(true),
+                        );
+                        if response.clicked() {
+                            self.open_recent_workspace(path);
                         }
+                    }
+                });
+        }
+
+        ui.add_space(14.0);
+        ui.label(RichText::new("ЯЗЫКИ И ИНСТРУМЕНТЫ").size(10.0).strong().color(MUTED));
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for (icon, label) in [
+                ("lang-rust", "Rust"), ("lang-c", "C / C++"), ("lang-typescript", "TypeScript"),
+                ("lang-javascript", "JavaScript"), ("lang-python", "Python"), ("lang-go", "Go"),
+                ("lang-java", "Java"), ("lang-sql", "SQL"), ("lang-docker", "Docker"),
+            ] {
+                egui::Frame::new().fill(PANEL.gamma_multiply(0.85))
+                    .stroke(Stroke::new(1.0_f32, BORDER))
+                    .inner_margin(egui::Margin::symmetric(8, 5))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            draw_icon(ui, &self.icons, icon, 16.0, Color32::WHITE);
+                            ui.label(RichText::new(label).size(10.5).color(TEXT));
+                        });
                     });
             }
-            ui.add_space(12.0);
-            ui.label(RichText::new("TypeScript · JavaScript · Python · Shell · C · Make · XSLT").size(11.0).color(MUTED));
-            ui.add_space(10.0);
-            ui.label(RichText::new(&self.status).size(10.5).color(MUTED));
         });
+        ui.add_space(8.0);
+        ui.label(RichText::new(&self.status).size(10.5).color(MUTED));
     }
 
     fn start_workspace_scan(&mut self) {
@@ -775,23 +888,26 @@ impl MinuxIde {
                             ("lang-typescript", "TypeScript / TSX"),
                             ("lang-javascript", "JavaScript / JSX"),
                             ("lang-python", "Python"),
-                            ("file-code", "Go"),
-                            ("file-code", "Java"),
-                            ("file-code", "Kotlin"),
-                            ("file-code", "Swift"),
-                            ("file-code", "Ruby"),
-                            ("file-code", "PHP"),
-                            ("file-code", "Lua"),
-                            ("file-code", "Scala"),
-                            ("file-code", "Haskell"),
-                            ("file-code", "Clojure"),
-                            ("file-code", "CoffeeScript"),
-                            ("file-code", "F#"),
-                            ("file-code", "Erlang"),
-                            ("file-code", "OCaml"),
-                            ("file-code", "MATLAB / R"),
+                            ("lang-go", "Go"),
+                            ("lang-java", "Java"),
+                            ("lang-kotlin", "Kotlin"),
+                            ("lang-swift", "Swift"),
+                            ("lang-ruby", "Ruby"),
+                            ("lang-php", "PHP"),
+                            ("lang-lua", "Lua"),
+                            ("lang-scala", "Scala"),
+                            ("lang-haskell", "Haskell"),
+                            ("lang-clojure", "Clojure"),
+                            ("lang-elixir", "Elixir"),
+                            ("lang-fsharp", "F#"),
+                            ("lang-erlang", "Erlang"),
+                            ("lang-perl", "Perl"),
+                            ("lang-r", "R / MATLAB"),
+                            ("lang-dart", "Dart"),
+                            ("lang-vue", "Vue"),
+                            ("lang-svelte", "Svelte"),
                             ("lang-bash", "Shell / Bash"),
-                            ("file-code", "SQL"),
+                            ("lang-sql", "SQL"),
                             ("lang-xml", "XML / XSL"),
                             ("lang-html5", "HTML"),
                             ("lang-css3", "CSS"),
@@ -801,8 +917,10 @@ impl MinuxIde {
                             ("file-text", "Markdown / LaTeX"),
                             ("file-code", "Diff / Patch"),
                             ("lang-make", "Makefile / CMake"),
-                            ("file-code", "PowerShell"),
-                            ("file-code", "Dockerfile"),
+                            ("lang-powershell", "PowerShell"),
+                            ("lang-docker", "Dockerfile"),
+                            ("lang-graphql", "GraphQL"),
+                            ("lang-cmake", "CMake"),
                         ] {
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
@@ -1526,12 +1644,11 @@ fn settings_row(ui: &mut egui::Ui, name: &str, value: &str, status_color: Color3
 
 fn file_icon_key_for_path(path: &Path) -> &'static str {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-    if matches!(name.as_str(), "makefile" | "gnumakefile" | "cmakelists.txt")
-        || name.ends_with(".make")
-        || name.ends_with(".mak")
-    {
+    if matches!(name.as_str(), "makefile" | "gnumakefile") || name.ends_with(".make") || name.ends_with(".mak") {
         return "lang-make";
     }
+    if name == "cmakelists.txt" { return "lang-cmake"; }
+    if name == "dockerfile" { return "lang-docker"; }
     if matches!(name.as_str(), ".bashrc" | ".bash_profile" | ".zshrc" | ".profile") {
         return "lang-bash";
     }
@@ -1541,16 +1658,36 @@ fn file_icon_key_for_path(path: &Path) -> &'static str {
         "ts" | "tsx" => "lang-typescript",
         "js" | "jsx" | "mjs" | "cjs" => "lang-javascript",
         "py" | "pyw" => "lang-python",
-        "c" => "lang-c",
-        "h" => "lang-c",
+        "c" | "h" => "lang-c",
         "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" => "lang-cplusplus",
         "cs" => "lang-csharp",
+        "go" => "lang-go",
+        "java" => "lang-java",
+        "php" => "lang-php",
+        "rb" | "rake" | "gemspec" => "lang-ruby",
+        "swift" => "lang-swift",
+        "kt" | "kts" => "lang-kotlin",
+        "lua" => "lang-lua",
+        "sql" => "lang-sql",
+        "dart" => "lang-dart",
+        "pl" | "pm" => "lang-perl",
+        "r" => "lang-r",
+        "scala" | "sc" => "lang-scala",
+        "hs" | "lhs" => "lang-haskell",
+        "clj" | "cljs" | "cljc" | "edn" => "lang-clojure",
+        "erl" | "hrl" => "lang-erlang",
+        "ex" | "exs" => "lang-elixir",
+        "vue" => "lang-vue",
+        "svelte" => "lang-svelte",
+        "ps1" | "psm1" | "psd1" => "lang-powershell",
+        "graphql" | "gql" => "lang-graphql",
+        "d" => "lang-d",
         "sh" | "bash" | "zsh" | "fish" => "lang-bash",
         "xml" | "xsl" | "xslt" | "xsd" | "dtd" => "lang-xml",
         "html" | "htm" => "lang-html5",
         "json" | "jsonc" => "lang-json",
         "md" | "markdown" | "txt" | "log" => "file-text",
-        "css" | "scss" | "sass" => "lang-css3",
+        "css" | "scss" | "sass" | "less" => "lang-css3",
         "yml" | "yaml" => "lang-yaml",
         "mk" => "lang-make",
         _ => if path.is_dir() { "folder" } else { "file-code" },
@@ -1663,6 +1800,10 @@ fn language_display_name(path: &Path) -> &'static str {
         "sql" => "SQL",
         "java" => "Java",
         "go" => "Go",
+        "dart" => "Dart",
+        "vue" => "Vue",
+        "svelte" => "Svelte",
+        "graphql" | "gql" => "GraphQL",
         "lua" => "Lua",
         "php" => "PHP",
         "rb" => "Ruby",
@@ -1721,8 +1862,28 @@ mod native_search_engine_tests {
 
 #[cfg(test)]
 mod language_support_tests {
-    use super::{language_display_name, syntax_selector_for_path};
+    use super::{file_icon_key_for_path, language_display_name, syntax_selector_for_path};
     use std::path::Path;
+
+    #[test]
+    fn maps_common_languages_to_distinct_icons() {
+        for (file, expected) in [
+            ("main.go", "lang-go"),
+            ("Main.java", "lang-java"),
+            ("index.php", "lang-php"),
+            ("server.rb", "lang-ruby"),
+            ("Main.swift", "lang-swift"),
+            ("Main.kt", "lang-kotlin"),
+            ("query.sql", "lang-sql"),
+            ("app.vue", "lang-vue"),
+            ("widget.svelte", "lang-svelte"),
+            ("schema.graphql", "lang-graphql"),
+            ("Dockerfile", "lang-docker"),
+            ("CMakeLists.txt", "lang-cmake"),
+        ] {
+            assert_eq!(file_icon_key_for_path(Path::new(file)), expected, "icon for {file}");
+        }
+    }
 
     #[test]
     fn recognizes_additional_language_extensions() {

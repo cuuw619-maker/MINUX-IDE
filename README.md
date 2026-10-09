@@ -1,6 +1,6 @@
 # MINUX IDE
 
-MINUX IDE is a native desktop coding environment with a Hugging Face coding agent, a project start screen, live appearance settings, and a user-triggered polyglot run command.
+MINUX IDE is a native desktop coding environment with a DuckDuckGo Chat API agent, configurable appearance, language-specific icons and a user-triggered polyglot run command.
 
 ## Build
 
@@ -18,17 +18,17 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 GitHub Actions is **manual-only**. Start it from the Actions page with **Run workflow**. It validates TypeScript/JavaScript, regenerates the XSLT theme catalog, audits the polyglot sources, and builds the Windows executable. No workflow is triggered by a push.
 
-## MINUX Agent / Hugging Face
+## MINUX Agent / DuckDuckGo Chat API
 
-1. Open Settings and enter a Hugging Face Access Token with Inference Providers permission.
-2. Select a model from the picker or enter a Hugging Face repository ID in `owner/model` form.
+1. Open Settings and choose a model from the built-in list or refresh the model catalog from the endpoint.
+2. Enter a token only if the endpoint requires one; requests without a token are attempted when the field is empty.
 3. Save settings and open the Agent panel.
 
-The client uses the OpenAI-compatible router at `https://router.huggingface.co/v1/chat/completions`. Requests run on worker threads. The model ID is validated before sending. If settings contain the previous concatenated value `zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct`, MINUX strips the known appended default and preserves the valid prefix `zai-org/GLM-5.3`. If the cleaned ID is not available to Hugging Face, the agent gives a model-not-found explanation and asks you to select an ID from the available-model list. A genuine `model_not_found` error now explains that the chosen ID/provider is unavailable.
+The client sends OpenAI-compatible chat requests to `https://duckduckgo.com/duckduckgo-html-api/v1/chat/completions`. It requests the model catalog from the sibling `/v1/models` path; if that catalog endpoint is unavailable, a built-in picker and manual model ID input remain available. Requests run on worker threads. The API token is optional and is sent as a Bearer token only when one is entered. IDs are checked for safe syntax, while the endpoint determines which models it actually supports.
 
 The agent can inspect a bounded project overview (language mix and build manifests), list workspace files, search text across bounded project trees, read text files, create folders/files, and edit files. For cross-language tasks it is instructed to extend the existing architecture instead of defaulting to Rust for every component. It also has a safe `replace_in_file` tool that only edits a fragment when it occurs exactly once, reducing accidental broad rewrites. Temporary HTTP failures (429/5xx) receive a small bounded backoff. Paths are restricted to the opened project, reads/writes are limited to 2 MiB, secret files are blocked, and agent tools do not delete files or execute shell commands.
 
-The token and appearance/recent-project settings are saved locally in `%APPDATA%\\MINUX-IDE\\settings.json` on Windows, without encryption. Do not publish or share the file.
+An optional API token and appearance/recent-project settings are saved locally in `%APPDATA%\\MINUX-IDE\\settings.json` on Windows, without encryption. Do not publish or share the file.
 
 ## Actual polyglot toolchain
 
@@ -45,11 +45,11 @@ Responsibilities are split by purpose: Rust/egui owns the desktop host and state
 
 ## Editor and customization
 
-- Initial screen asks which project folder to open and shows recent folders instead of immediately opening the current working directory.
-- The AI sidebar and home/editor transitions use native C easing (including a quintic sidebar curve); transition speed is configurable. UI zoom is adjustable from 85% to 125% and is saved with the other settings.
-- Settings include four built-in palettes, a custom color picker, corner radius, editor font size, animation speed, Hugging Face model, thinking and response token limit. Appearance settings persist with the rest of the local settings.
+- Initial screen uses a project-launch hero, visual language badges, recent-project entries and quick access to appearance settings.
+- The AI sidebar, activity rail buttons and home/editor transitions use native C easing; switching the left workspace pane animates its width. Transition speed is configurable. UI zoom ranges from 75% to 150%.
+- Settings include four built-in palettes, a custom color picker, corner radius, editor font size up to 30 px, UI zoom, sidebar width from 220–420 px, icon size from 14–28 px, animation speed, selected model and response token limit. Appearance settings persist with the rest of the local settings.
 - C v4 handles ranked exact/prefix/substring/fuzzy scoring for filenames and relative paths, model-ID checks, and bounded easing curves. The workspace search gives basename matches priority while still finding files by directory name.
-- SVG icon assets are bundled locally with thinner stroke rendering.
+- SVG icon assets are bundled locally with thinner stroke rendering. Language-specific icons cover Go, Java, PHP, Ruby, Swift, Kotlin, Lua, SQL, Dart, Perl, R, Scala, Haskell, Clojure, Erlang, Elixir, Vue, Svelte, PowerShell, GraphQL, Docker, CMake and D.
 - Workspace indexing runs in a cancellable worker; generated directories are ignored and tree/search rows are virtualized.
 
 ## Run button
