@@ -1,4 +1,23 @@
 use eframe::egui;
+
+unsafe extern "C" {
+    fn minux_engine_version() -> u32;
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "C" {
+    fn minux_agent_version() -> u32;
+}
+
+#[cfg(target_os = "windows")]
+fn agent_version() -> u32 {
+    unsafe { minux_agent_version() }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn agent_version() -> u32 {
+    0
+}
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -228,7 +247,7 @@ impl eframe::App for MinuxIde {
                             });
                         }
                         job.wrap.max_width = wrap_width;
-                        ui.fonts_mut(|f| f.layout_job(job))
+                        ui.fonts(|f| f.layout_job(job))
                     };
 
                     let response = ui.add(
@@ -264,7 +283,9 @@ impl eframe::App for MinuxIde {
                 ui.label("Пока значения не сохраняются и API-запросы не выполняются.");
                 ui.add_space(12.0);
                 ui.label("Ядро интерфейса: Rust + egui");
-                ui.label("Планируемые подсистемы: C++ — нативные инструменты; C# — интеграции и расширения.");
+                ui.label(format!("C++ Native Engine: v{}", unsafe { minux_engine_version() }));
+                ui.label(format!("C# Agent NativeAOT: v{}", agent_version()));
+                ui.label("C++ и C# собираются как статические библиотеки и линкуются в исполняемый файл.");
             }
         });
     }
