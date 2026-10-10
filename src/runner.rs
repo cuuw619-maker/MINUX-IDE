@@ -42,7 +42,7 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
             run_make(&selected, &root)
         }
         _ => Err(format!(
-            "Для .{} пока нет команды запуска. Поддерживаются TypeScript/JavaScript, Shell, Python, C, Make и XSLT.",
+            "Для .{} пока нет команды запуска. Поддерживаются Kotlin, TypeScript/JavaScript, Shell, Python, C, Make и XSLT.",
             if extension.is_empty() { "unknown" } else { &extension }
         )),
     }

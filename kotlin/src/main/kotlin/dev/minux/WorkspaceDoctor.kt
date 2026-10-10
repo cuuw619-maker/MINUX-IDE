@@ -82,7 +82,7 @@ object WorkspaceDoctor {
         "lua", "sql", "dart", "pl", "pm", "scala", "hs", "clj", "cljs", "erl", "ex",
         "exs", "vue", "svelte", "html", "css", "scss", "xml", "xsl", "md",
     )
-    private val todoPattern = Regex("\\b(TODO|FIXME|HACK|XXX)\\b", RegexOption.IGNORE_CASE)
+    private val todoPattern = Regex("""(?i)(//|#|/\*|\*|<!--).*\b(TODO|FIXME|HACK|XXX)\b""")
     private val whitespacePattern = Regex("\\s+")
 
     fun inspect(
@@ -126,7 +126,7 @@ object WorkspaceDoctor {
                     if (!attrs.isRegularFile || attrs.isSymbolicLink) return FileVisitResult.CONTINUE
                     fileCount++
 
-                    val relative = root.relativize(file).toString().replace('\\\\', '/')
+                    val relative = root.relativize(file).toString().replace('\\', '/')
                     val normalizedName = file.fileName.toString().lowercase(Locale.ROOT)
                     val extension = normalizedName.substringAfterLast('.', "")
                     languageByExtension[extension]?.let { language ->
@@ -150,7 +150,7 @@ object WorkspaceDoctor {
                                                 break
                                             }
                                             val preview = line.trim().replace(whitespacePattern, " ").take(180)
-                                            todos += TodoFinding(relative, lineNumber, match.value.uppercase(Locale.ROOT), preview)
+                                            todos += TodoFinding(relative, lineNumber, match.groupValues.last().uppercase(Locale.ROOT), preview)
                                         }
                                         if (todoLimitReached) break
                                     }
