@@ -30,6 +30,8 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
         "jsx" => run_typescript(&selected, &root, true),
         "ts" => run_typescript(&selected, &root, false),
         "tsx" => run_typescript(&selected, &root, true),
+        "kt" => run_kotlin_source(&selected, &root),
+        "kts" => run_program("kotlinc", &[std::ffi::OsStr::new("-script"), selected.as_os_str()], &root),
         "py" | "pyw" => run_python(&selected, &root),
         "sh" | "bash" => run_fallback("bash", &[selected.as_os_str()], "sh", &[selected.as_os_str()], &root),
         "ps1" => run_fallback("pwsh", &[std::ffi::OsStr::new("-NoProfile"), std::ffi::OsStr::new("-File"), selected.as_os_str()],
@@ -77,6 +79,38 @@ fn run_with_tsx(file: &Path, root: &Path) -> Result<String, String> {
         return Err("Для TSX/JSX или Node без поддержки type stripping установи зависимости проекта: npm install".into());
     }
     run_program("node", &[entry.as_os_str(), file.as_os_str()], root)
+}
+
+/// Compile and run one selected Kotlin source file using the installed Kotlin CLI.
+fn run_kotlin_source(file: &Path, root: &Path) -> Result<String, String> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let jar = std::env::temp_dir().join(format!("minux-kotlin-{}-{stamp}.jar", std::process::id()));
+    let compile = Command::new("kotlinc")
+        .arg(file)
+        .arg("-include-runtime")
+        .arg("-d")
+        .arg(&jar)
+        .current_dir(root)
+        .output()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                "Для запуска Kotlin установи JDK и Kotlin compiler (команда kotlinc) и добавь их в PATH.".to_string()
+            } else {
+                format!("Не удалось запустить Kotlin compiler: {error}")
+            }
+        })?;
+
+    if !compile.status.success() {
+        let detail = format_output(compile);
+        let _ = fs::remove_file(&jar);
+        return Err(format!("Ошибка компиляции Kotlin:\n{detail}"));
+    }
+
+    let result = output("java", &[std::ffi::OsStr::new("-jar"), jar.as_os_str()], root);
+    let _ = fs::remove_file(&jar);
+    result.and_then(|output| {
+        if output.status.success() { Ok(format_output(output)) } else { Err(format_output(output)) }
+    })
 }
 
 fn run_python(file: &Path, root: &Path) -> Result<String, String> {

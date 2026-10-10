@@ -638,7 +638,7 @@ impl MinuxIde {
 
     fn save_ai_settings(&mut self) {
         match ai::save_settings(&self.current_ai_settings()) {
-            Ok(()) => self.status = "Настройки DuckDuckGo Chat API сохранены локально".into()
+            Ok(()) => self.status = "Настройки DuckDuckGo Chat API сохранены локально".into(),
             Err(error) => self.status = error,
         }
     }
@@ -987,11 +987,33 @@ impl MinuxIde {
             });
 
         ui.add_space(5.0);
+        ui.add_space(5.0);
+        ui.label(RichText::new("БЫСТРЫЕ ДЕЙСТВИЯ").size(9.0).strong().color(MUTED));
+        let mut quick_task: Option<&'static str> = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui.small_button("Объяснить файл").clicked() {
+                quick_task = Some("Подробно объясни назначение и логику выбранного файла. Не изменяй его.");
+            }
+            if ui.small_button("Исправить ошибки").clicked() {
+                quick_task = Some("Проверь выбранный файл на ошибки и очевидные баги. Исправь только подтверждённые проблемы и объясни изменения.");
+            }
+            if ui.small_button("Добавить тесты").clicked() {
+                quick_task = Some("Изучи выбранный файл и добавь полезные тесты в существующую тестовую структуру проекта. Используй язык и инструменты, уже применяемые в проекте.");
+            }
+        });
+        if let Some(task) = quick_task {
+            if let Some(path) = self.selected_file.clone() {
+                let relative = path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy();
+                self.send_agent_prompt(format!("{task}\nФайл: {relative}"));
+            } else {
+                self.status = "Сначала выбери файл в проводнике.".into();
+            }
+        }
         if !connected && ui.button("Настроить DuckDuckGo API").clicked() {
             self.settings_open = true;
         }
         ui.horizontal(|ui| {
-            ui.label(RichText::new(if self.thinking_enabled { "Thinking: вкл." } else { "Thinking: выкл." }).size(10.0).color(MUTED));
+            ui.label(RichText::new(if self.thinking_enabled { "Режим тщательного анализа: вкл." } else { "Режим тщательного анализа: выкл." }).size(10.0).color(MUTED));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки модели").clicked() {
                     self.settings_open = true;
