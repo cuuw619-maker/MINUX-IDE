@@ -88,7 +88,7 @@ object WorkspaceDoctor {
         "jl", "zig", "sol", "tf", "hcl", "nix", "f", "for", "f90", "f95", "f03", "f08",
         "ml", "mli", "mm", "m",
     )
-    private val todoPattern = Regex("""(?i)(//|#|/\*|\*|<!--).*\b(TODO|FIXME|HACK|XXX)\b""")
+    private val todoPattern = Regex("""(?i)^\s*(//|#|/\*|\*|<!--).*\b(TODO|FIXME|HACK|XXX)\b""")
     private val whitespacePattern = Regex("\\s+")
 
     fun inspect(

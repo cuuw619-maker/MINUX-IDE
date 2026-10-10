@@ -42,7 +42,7 @@ class WorkspaceDoctorTest {
         Files.createDirectories(workspace.resolve("src"))
         Files.writeString(workspace.resolve("target/generated/Generated.kt"), "// FIXME: not source\n")
         Files.writeString(workspace.resolve("src/real.kt"), "// TODO: inspect this\n")
-        Files.writeString(workspace.resolve(".env"), "TOKEN=private // TODO secret\n")
+        Files.writeString(workspace.resolve("src/.env.kt"), "// TODO secret token must be skipped\n")
 
         val report = WorkspaceDoctor.inspect(workspace)
 
