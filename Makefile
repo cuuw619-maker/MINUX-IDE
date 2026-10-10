@@ -1,4 +1,4 @@
-.PHONY: build test check themes audit clean dev
+.PHONY: build test check themes audit clean dev kotlin-test
 
 build:
 	cargo build --release
@@ -16,6 +16,10 @@ test: audit
 	cargo test
 	npm run typecheck
 	npm run test:js
+	gradle -p kotlin test
+
+kotlin-test:
+	gradle -p kotlin test
 
 check: test
 

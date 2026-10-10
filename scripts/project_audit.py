@@ -12,11 +12,15 @@ REQUIRED = (
     "web/model_id.test.mjs", "scripts/dev.sh", "scripts/generate_themes.py",
     "resources/themes.xml", "resources/themes.xsl", "resources/themes.json",
     "src/runner.rs", "src/theme.rs",
+    "kotlin/settings.gradle.kts", "kotlin/build.gradle.kts",
+    "kotlin/src/main/kotlin/dev/minux/WorkspaceDoctor.kt",
+    "kotlin/src/test/kotlin/dev/minux/WorkspaceDoctorTest.kt",
 )
 LANGUAGE_EXTENSIONS = {
     "TypeScript": {".ts", ".tsx"}, "JavaScript": {".js", ".mjs", ".cjs"},
     "Python": {".py"}, "Shell": {".sh", ".bash"}, "C": {".c", ".h"},
     "XSLT": {".xsl", ".xslt"}, "Make": {".mk"},
+    "Kotlin": {".kt", ".kts"},
 }
 
 def main() -> int:
@@ -27,7 +31,7 @@ def main() -> int:
         return 1
     counts: Counter[str] = Counter()
     for path in root.rglob("*"):
-        if not path.is_file() or any(part in {".git", "target", "node_modules"} for part in path.parts):
+        if not path.is_file() or any(part in {".git", "target", "node_modules", ".gradle", "build", "out", "dist"} for part in path.parts):
             continue
         for language, extensions in LANGUAGE_EXTENSIONS.items():
             if path.suffix.lower() in extensions or (language == "Make" and path.name == "Makefile"):

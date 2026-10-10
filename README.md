@@ -4,7 +4,7 @@ MINUX IDE is a native desktop coding environment with a DuckDuckGo Chat API agen
 
 ## Build
 
-Requirements: Rust stable, Node.js 22+, Python 3.12+, and (for theme generation) dependencies from `requirements-dev.txt`.
+Requirements: Rust stable, JDK 21, Gradle 8.14.3+, Node.js 22+, Python 3.12+, and (for theme generation) dependencies from `requirements-dev.txt`.
 
 ```powershell
 python -m pip install -r requirements-dev.txt
@@ -13,6 +13,8 @@ python scripts/generate_themes.py
 python scripts/project_audit.py .
 npm run typecheck
 npm run test:js
+gradle -p kotlin test
+gradle -p kotlin run --args=".."
 cargo build --release --target x86_64-pc-windows-msvc
 ```
 
@@ -35,9 +37,11 @@ An optional API token and appearance/recent-project settings are saved locally i
 The languages listed below are used for project functionality and developer tools, not only shown in the syntax picker:
 
 - **TypeScript and JavaScript** — model-ID guard utilities with type-checking and executable regression tests.
+- **Kotlin** — bounded workspace diagnostics in `kotlin/src/main/kotlin/dev/minux/WorkspaceDoctor.kt`, with JUnit tests for language counts, manifest detection, TODO scanning, ignored build folders, secret paths and scan limits.
 - **Python** — source-tree audit and theme catalog generator.
 - **XSLT + XML** — source of truth for the Ocean, Violet, Emerald and Amber theme palettes; XSLT transforms `resources/themes.xml` into the JSON catalog embedded by the native UI.
 - **C** — compiled native core used for model-ID validation and panel easing.
+- **Kotlin** — a real `WorkspaceDoctor` CLI scans language/build-manifest counts and TODO/FIXME/HACK markers under safety limits. It has automated tests, is run in manual CI, and can be launched from the editor when selecting a `.kt` file.
 - **Shell + Make** — repeatable developer commands through `scripts/dev.sh` and the root `Makefile`.
 - **TypeScript, JavaScript, Python, Shell, C, Make, XSLT** — supported by the Run button through their local runtimes/tools when installed. Running code is always a user-initiated action.
 
@@ -64,6 +68,8 @@ The **Run** toolbar button runs the currently selected and saved file on an expl
 | `.sh` | Bash or sh |
 | `.ps1` | PowerShell |
 | `.c` | GCC/Clang (`cc`) compile, then run |
+| `.kt` | Kotlin compiler (`kotlinc`) → temporary JAR → Java |
+| `.kts` | Kotlin script runner (`kotlinc -script`) |
 | `Makefile` / `.mk` | GNU Make |
 | `.xsl` / `.xslt` | `xsltproc`, with an adjacent XML input |
 
@@ -76,6 +82,7 @@ make build      # release build
 make dev        # launch from source
 make themes     # regenerate resources/themes.json from XML + XSLT
 make audit      # check the polyglot source tree
-make test       # source audit + Rust tests + TypeScript checks + JavaScript tests
+make test       # source audit + Rust/Kotlin tests + TypeScript checks + JavaScript tests
+make kotlin-test # run Kotlin workspace diagnostic tests
 # Or: scripts/dev.sh test
 ```
