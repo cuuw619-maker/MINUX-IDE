@@ -53,7 +53,7 @@ Responsibilities are split by purpose: Rust/egui owns the desktop host and state
 - The AI sidebar, activity rail buttons and home/editor transitions use native C easing; switching the left workspace pane animates its width. Transition speed is configurable. UI zoom ranges from 75% to 150%.
 - Settings include four built-in palettes, a custom color picker, corner radius, editor font size up to 30 px, UI zoom, sidebar width from 220–420 px, icon size from 14–28 px, animation speed, selected model and response token limit. Appearance settings persist with the rest of the local settings.
 - C v4 handles ranked exact/prefix/substring/fuzzy scoring for filenames and relative paths, model-ID checks, and bounded easing curves. The workspace search gives basename matches priority while still finding files by directory name.
-- SVG icon assets are bundled locally with thinner stroke rendering. Language-specific icons cover Go, Java, PHP, Ruby, Swift, Kotlin, Lua, SQL, Dart, Perl, R, Scala, Haskell, Clojure, Erlang, Elixir, Vue, Svelte, PowerShell, GraphQL, Docker, CMake and D.
+- SVG icon assets are bundled locally with thinner stroke rendering. Language-specific icons cover Go, Java, PHP, Ruby, Swift, Kotlin, Lua, SQL, Dart, Perl, R, Scala, Haskell, Clojure, Erlang, Elixir, Vue, Svelte, PowerShell, GraphQL, Docker, CMake, D, Julia, Zig, Solidity, Terraform/HCL, Nix, Fortran, OCaml, Objective-C and MATLAB.
 - Workspace indexing runs in a cancellable worker; generated directories are ignored and tree/search rows are virtualized.
 
 ## Run button
