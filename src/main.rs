@@ -93,6 +93,9 @@ struct MinuxIde {
     sidebar_width: f32,
     icon_size: f32,
     sidebar_transition_state: bool,
+    new_item_open: bool,
+    new_item_is_folder: bool,
+    new_item_name: String,
     editor_font_size: f32,
     recent_workspaces: Vec<String>,
     ai_tx: Sender<AiEvent>,
@@ -158,6 +161,9 @@ impl Default for MinuxIde {
             sidebar_width: settings.sidebar_width.clamp(220.0, 420.0),
             icon_size: settings.icon_size.clamp(14.0, 28.0),
             sidebar_transition_state: false,
+            new_item_open: false,
+            new_item_is_folder: false,
+            new_item_name: String::new(),
             editor_font_size: settings.editor_font_size.clamp(11.0, 30.0),
             recent_workspaces: settings.recent_workspaces,
             ai_tx,
@@ -239,6 +245,7 @@ fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::Textur
         ("brain", include_str!("../assets/icons/brain.svg")),
         ("cloud-download", include_str!("../assets/icons/cloud-download.svg")),
         ("folder-plus", include_str!("../assets/icons/folder-plus.svg")),
+        ("file-plus", include_str!("../assets/icons/file-plus.svg")),
         ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
         ("lang-go", include_str!("../assets/icons/lang-go.svg")),
         ("lang-java", include_str!("../assets/icons/lang-java.svg")),
@@ -366,6 +373,61 @@ impl MinuxIde {
 
     fn open_recent_workspace(&mut self, folder: &str) {
         self.activate_workspace(PathBuf::from(folder));
+    }
+
+    fn create_workspace_item(&mut self) {
+        let name = self.new_item_name.trim().to_owned();
+        if name.is_empty()
+            || name.len() > 120
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            self.status = "Укажи короткое имя без путей и разделителей.".into();
+            return;
+        }
+
+        let root = match self.root.canonicalize() {
+            Ok(root) if root.is_dir() => root,
+            _ => {
+                self.status = "Корневая папка проекта недоступна.".into();
+                return;
+            }
+        };
+        let target = root.join(&name);
+        let is_folder = self.new_item_is_folder;
+        let creation = if is_folder {
+            fs::create_dir(&target).map(|_| ())
+        } else {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+                .map(drop)
+        };
+
+        match creation {
+            Ok(()) => {
+                self.root = root;
+                self.new_item_open = false;
+                self.new_item_name.clear();
+                self.start_workspace_scan();
+                if is_folder {
+                    self.status = format!("Папка создана: {name}");
+                } else {
+                    self.open_file(target);
+                    self.status = format!("Файл создан: {name}");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                self.status = "Файл или папка с таким именем уже существует.".into();
+            }
+            Err(error) => {
+                self.status = format!("Не удалось создать элемент: {error}");
+            }
+        }
     }
 
     fn return_to_home(&mut self) {
@@ -824,6 +886,16 @@ impl MinuxIde {
                         if toolbar_icon_button(ui, &self.icons, "refresh-cw", false, "Пересканировать проект").clicked() {
                             self.start_workspace_scan();
                         }
+                        if toolbar_icon_button(ui, &self.icons, "folder-plus", false, "Создать папку в корне").clicked() {
+                            self.new_item_open = true;
+                            self.new_item_is_folder = true;
+                            self.new_item_name.clear();
+                        }
+                        if toolbar_icon_button(ui, &self.icons, "file-plus", false, "Создать файл в корне").clicked() {
+                            self.new_item_open = true;
+                            self.new_item_is_folder = false;
+                            self.new_item_name.clear();
+                        }
                     });
                 });
                 ui.add_space(8.0);
@@ -831,6 +903,31 @@ impl MinuxIde {
                     draw_icon(ui, &self.icons, "folder-open", 16.0, Color32::WHITE);
                     ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).strong().size(12.0));
                 });
+                if self.new_item_open {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(if self.new_item_is_folder { "НОВАЯ ПАПКА" } else { "НОВЫЙ ФАЙЛ" }).size(9.0).strong().color(self.accent_color()));
+                    ui.add_sized(
+                        [ui.available_width(), 28.0],
+                        egui::TextEdit::singleline(&mut self.new_item_name)
+                            .hint_text(if self.new_item_is_folder { "Имя папки" } else { "Имя файла, например Main.kt" }),
+                    );
+                    let mut submit = false;
+                    let mut cancel = false;
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Создать").clicked() {
+                            submit = true;
+                        }
+                        if ui.small_button("Отмена").clicked() {
+                            cancel = true;
+                        }
+                    });
+                    if cancel {
+                        self.new_item_open = false;
+                        self.new_item_name.clear();
+                    } else if submit {
+                        self.create_workspace_item();
+                    }
+                }
                 ui.separator();
                 self.draw_tree(ui);
             }
