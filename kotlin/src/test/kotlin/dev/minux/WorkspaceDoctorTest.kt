@@ -19,16 +19,21 @@ class WorkspaceDoctorTest {
         Files.writeString(workspace.resolve("src/App.kt"), "fun main() {}\n// TODO: add validation\n")
         Files.writeString(workspace.resolve("src/lib.rs"), "fn main() {}\n")
         Files.writeString(workspace.resolve("web.ts"), "const value: number = 1;\n")
+        Files.writeString(workspace.resolve("science.jl"), "module Science\n# TODO: improve solver\n")
+        Files.writeString(workspace.resolve("native.zig"), "pub fn main() void {}\n")
 
         val report = WorkspaceDoctor.inspect(workspace)
 
         assertEquals(1, report.languageCounts["Kotlin"])
         assertEquals(1, report.languageCounts["Rust"])
         assertEquals(1, report.languageCounts["TypeScript"])
+        assertEquals(1, report.languageCounts["Julia"])
+        assertEquals(1, report.languageCounts["Zig"])
         assertTrue(report.buildFiles.contains("Cargo.toml"))
         assertEquals(1, report.todoFindings.size)
         assertEquals("TODO", report.todoFindings.single().marker)
         assertEquals(2, report.todoFindings.single().line)
+        assertEquals("TODO", report.todoFindings.last().marker)
     }
 
     @Test

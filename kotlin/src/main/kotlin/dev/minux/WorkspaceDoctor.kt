@@ -64,6 +64,10 @@ object WorkspaceDoctor {
         "lua" to "Lua", "sql" to "SQL", "dart" to "Dart", "pl" to "Perl", "pm" to "Perl",
         "r" to "R", "scala" to "Scala", "hs" to "Haskell", "clj" to "Clojure",
         "cljs" to "Clojure", "erl" to "Erlang", "ex" to "Elixir", "exs" to "Elixir",
+        "jl" to "Julia", "zig" to "Zig", "sol" to "Solidity", "tf" to "Terraform",
+        "hcl" to "Terraform", "nix" to "Nix", "f" to "Fortran", "for" to "Fortran",
+        "f90" to "Fortran", "f95" to "Fortran", "f03" to "Fortran", "f08" to "Fortran",
+        "ml" to "OCaml", "mli" to "OCaml", "mm" to "Objective-C", "m" to "MATLAB",
         "vue" to "Vue", "svelte" to "Svelte", "html" to "HTML", "css" to "CSS",
         "scss" to "SCSS", "xml" to "XML", "xsl" to "XSLT", "md" to "Markdown",
         "json" to "JSON", "yaml" to "YAML", "yml" to "YAML", "toml" to "TOML",
@@ -81,6 +85,8 @@ object WorkspaceDoctor {
         "jsx", "mjs", "py", "pyw", "sh", "bash", "java", "go", "php", "rb", "swift",
         "lua", "sql", "dart", "pl", "pm", "scala", "hs", "clj", "cljs", "erl", "ex",
         "exs", "vue", "svelte", "html", "css", "scss", "xml", "xsl", "md",
+        "jl", "zig", "sol", "tf", "hcl", "nix", "f", "for", "f90", "f95", "f03", "f08",
+        "ml", "mli", "mm", "m",
     )
     private val todoPattern = Regex("""(?i)(//|#|/\*|\*|<!--).*\b(TODO|FIXME|HACK|XXX)\b""")
     private val whitespacePattern = Regex("\\s+")
