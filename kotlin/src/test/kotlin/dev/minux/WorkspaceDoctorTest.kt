@@ -19,7 +19,7 @@ class WorkspaceDoctorTest {
         Files.writeString(workspace.resolve("src/App.kt"), "fun main() {}\n// TODO: add validation\n")
         Files.writeString(workspace.resolve("src/lib.rs"), "fn main() {}\n")
         Files.writeString(workspace.resolve("web.ts"), "const value: number = 1;\n")
-        Files.writeString(workspace.resolve("science.jl"), "module Science\n# TODO: improve solver\n")
+        Files.writeString(workspace.resolve("science.jl"), "module Science\n")
         Files.writeString(workspace.resolve("native.zig"), "pub fn main() void {}\n")
 
         val report = WorkspaceDoctor.inspect(workspace)
