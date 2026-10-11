@@ -284,7 +284,7 @@ pub fn fetch_models(api_base_url: &str, token: &str) -> Result<Vec<String>, Stri
         request = request.bearer_auth(token.trim());
     }
     let response = request.send()
-        .map_err(|e| format!("Не удалось получить каталог DuckDuckGo Chat API: {e}"))?;
+        .map_err(|e| format!("Не удалось получить каталог моделей у настроенного API: {e}"))?;
     let status = response.status();
     if status.is_redirection() {
         let location = response.headers().get(reqwest::header::LOCATION)
@@ -590,7 +590,7 @@ fn request_assistant(
         return Err(format_api_error(status.as_u16(), &body));
     }
 
-    Err("DuckDuckGo Chat API отклонил параметры запроса после повторных попыток. Выбери другую модель или отключи инструменты, если провайдер их не поддерживает.".into())
+    Err("Настроенный Chat API отклонил параметры запроса после повторных попыток. Выбери другую модель или проверь поддержку function calling у провайдера.".into())
 }
 
 fn parse_assistant_message(response: &Value) -> Result<Value, String> {
@@ -598,7 +598,7 @@ fn parse_assistant_message(response: &Value) -> Result<Value, String> {
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"))
-        .ok_or_else(|| "DuckDuckGo Chat API вернул JSON не в формате Chat Completions (нет choices[0].message). Проверь endpoint и ID модели.".to_string())?;
+        .ok_or_else(|| "Настроенный Chat API вернул JSON не в формате Chat Completions (нет choices[0].message). Проверь Base URL и ID модели.".to_string())?;
     let content = extract_text(message.get("content")).unwrap_or_default();
     if looks_like_duckduckgo_page(&content) {
         return Err(html_endpoint_error(200));
