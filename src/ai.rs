@@ -8,7 +8,9 @@ use std::{
     time::Duration,
 };
 
-const DEFAULT_API_BASE_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1";
+const LEGACY_DUCKDUCKGO_BASE_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1";
+const DEFAULT_API_BASE_URL: &str = "https://api.sambanova.ai/v1";
+const DEFAULT_MODEL: &str = "Meta-Llama-3.3-70B-Instruct";
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOOL_ROUNDS: usize = 8;
 
@@ -39,7 +41,7 @@ impl Default for AiSettings {
         Self {
             api_base_url: DEFAULT_API_BASE_URL.to_owned(),
             token: String::new(),
-            model: "gpt-4o-mini".into(),
+            model: DEFAULT_MODEL.into(),
             thinking_enabled: true,
             max_tokens: 2048,
             theme_accent: "ocean".into(),
@@ -68,11 +70,11 @@ pub struct AgentResponse {
 
 pub fn suggested_models() -> &'static [&'static str] {
     &[
-        "gpt-4o-mini",
-        "claude-3-5-haiku-latest",
-        "meta-llama/Meta-Llama-3.3-70B-Instruct",
-        "mistralai/Mistral-Small-24B-Instruct-2501",
-        "deepseek-chat",
+        "Meta-Llama-3.3-70B-Instruct",
+        "DeepSeek-R1",
+        "DeepSeek-V3-0324",
+        "Qwen3-32B",
+        "Llama-4-Maverick-17B-128E-Instruct",
     ]
 }
 
@@ -98,7 +100,7 @@ pub fn normalize_duckduckgo_model_id(input: &str) -> Result<String, String> {
         || value.ends_with('/')
         || value.contains("//")
     {
-        return Err("Некорректный ID модели. Используй ID без пробелов, например gpt-4o-mini.".into());
+        return Err("Некорректный ID модели. Используй ID без пробелов, например Meta-Llama-3.3-70B-Instruct.".into());
     }
     Ok(value.to_owned())
 }
@@ -132,13 +134,19 @@ pub fn load_settings() -> AiSettings {
     let stored_model = settings.model.trim().to_owned();
     let known_legacy_model = legacy_hf_models().contains(&stored_model.as_str())
         || stored_model == "zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct";
-    settings.api_base_url = normalize_api_base_url(&settings.api_base_url)
-        .unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_owned());
-    settings.model = if known_legacy_model {
-        AiSettings::default().model
+    let stored_base = settings.api_base_url.trim().trim_end_matches('/');
+    let migrating_from_duckduckgo = stored_base == LEGACY_DUCKDUCKGO_BASE_URL;
+    settings.api_base_url = if migrating_from_duckduckgo {
+        DEFAULT_API_BASE_URL.to_owned()
+    } else {
+        normalize_api_base_url(&settings.api_base_url)
+            .unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_owned())
+    };
+    settings.model = if migrating_from_duckduckgo || known_legacy_model {
+        DEFAULT_MODEL.to_owned()
     } else {
         normalize_duckduckgo_model_id(&stored_model)
-            .unwrap_or_else(|_| AiSettings::default().model)
+            .unwrap_or_else(|_| DEFAULT_MODEL.to_owned())
     };
     settings.corner_radius = settings.corner_radius.clamp(3, 14);
     settings.editor_font_size = settings.editor_font_size.clamp(11.0, 30.0);
@@ -343,16 +351,16 @@ fn looks_like_duckduckgo_page(content: &str) -> bool {
 
 fn html_endpoint_error(status: u16) -> String {
     if status == 410 {
-        return "Настроенный Chat API вернул HTTP 410 Gone: endpoint удалён или отключён. Повторные запросы и исправление сетевых перенаправлений это не исправят. Открой Настройки → AI API и укажи рабочий OpenAI-совместимый Base URL; ответ HTML не добавлен в историю чата.".into();
+        return "Настроенный API вернул HTTP 410 Gone: endpoint удалён или отключён. Проверь Base URL. Для SambaNova Cloud API укажи https://api.sambanova.ai/v1, а не cloud.sambanova.ai; HTML не добавлен в историю чата.".into();
     }
     format!(
-        "Настроенный Chat API вернул HTML вместо JSON (HTTP {status}). Автоматическое следование перенаправлениям отключено, поэтому HTML не попадёт в историю чата. Проверь Base URL в настройках; если сервер вернул 301/302/307/308, приложение покажет заголовок Location."
+        "SambaNova API вернул HTML вместо JSON (HTTP {status}). Автоматические перенаправления отключены, поэтому HTML не попадёт в историю чата. Проверь, что Base URL — https://api.sambanova.ai/v1, а не веб-страница cloud.sambanova.ai."
     )
 }
 
 fn redirect_error(status: u16, location: Option<&str>) -> String {
     let destination = location.map(|value| format!(" Location: {value}")).unwrap_or_default();
-    format!("Chat API вернул перенаправление HTTP {status}; оно не выполнено автоматически.{destination} Проверь Base URL в настройках. Если это старый endpoint DuckDuckGo, замени его на действующий OpenAI-совместимый API.")
+    format!("SambaNova API вернул перенаправление HTTP {status}; оно не выполнено автоматически.{destination} Проверь Base URL. Должен использоваться https://api.sambanova.ai/v1.")
 }
 
 fn format_api_error(status: u16, body: &str) -> String {
@@ -369,7 +377,7 @@ fn format_api_error(status: u16, body: &str) -> String {
             .and_then(|value| value.pointer("/error/message").or_else(|| value.get("message")))
             .and_then(Value::as_str)
             .unwrap_or("Модель не существует или недоступна этому endpoint.");
-        return format!("Настроенный Chat API не распознал модель. Проверь ID модели или выбери вариант из каталога. {message}");
+        return format!("SambaNova Cloud не распознал ID модели. Обнови каталог и выбери поддерживаемую модель. {message}");
     }
 
     let detail = parsed
