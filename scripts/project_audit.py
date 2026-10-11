@@ -60,7 +60,7 @@ LANGUAGE_EXTENSIONS = {
     "SQL": {".sql"},
     "HTML": {".html", ".htm"},
     "CSS": {".css", ".scss", ".sass", ".less"},
-    "XML/XSLT": {".xml", ".xsl", ".xslt", ".xsd", ".dtd"},
+    "XML": {".xml", ".xsd", ".dtd"},
     "JSON": {".json", ".jsonc", ".json5", ".jsonl"},
     "YAML": {".yaml", ".yml"},
     "TOML": {".toml"},
