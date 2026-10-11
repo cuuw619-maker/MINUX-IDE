@@ -1412,7 +1412,9 @@ impl MinuxIde {
         settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native C core", &format!("C · v{}", unsafe { minux_engine_version() }), GREEN);
         settings_row(ui, "AI endpoint", "DuckDuckGo HTML Chat API", GREEN);
-        settings_row(ui, "Runtime", "Rust · C/C++ · Go · Java · Kotlin · JS/TS · Python · Shell · Ruby · Lua · PHP · Swift", GREEN);
+        settings_row(ui, "Compiled + JVM", "Rust · C/C++ · Assembly · Fortran · Go · C# · Java/Kotlin · JS/TS · Python", GREEN);
+        settings_row(ui, "Script engines", "Shell/PowerShell · Ruby/PHP · Lua/Perl · Swift · Haskell/Scala · Julia/Zig", GREEN);
+        settings_row(ui, "Project tools", "Clojure · Erlang · OCaml · D · Nix · F# · Tcl · Make · XSLT · Terraform", GREEN);
         ui.add_space(8.0);
         ui.label(RichText::new("Файловая структура сканируется в отдельном потоке; отображение дерева виртуализировано.").size(11.0).color(MUTED));
         ui.add_space(10.0);
