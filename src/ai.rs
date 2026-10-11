@@ -244,7 +244,7 @@ fn build_client() -> Result<Client, String> {
 
 pub fn fetch_models(token: &str) -> Result<Vec<String>, String> {
     let client = build_client()?;
-    let mut request = client.get(MODELS_URL);
+    let mut request = client.get(MODELS_URL).header("Accept", "application/json");
     if !token.trim().is_empty() {
         request = request.bearer_auth(token.trim());
     }
@@ -303,7 +303,7 @@ fn looks_like_duckduckgo_page(content: &str) -> bool {
 
 fn html_endpoint_error(status: u16) -> String {
     format!(
-        "DuckDuckGo Chat API вернул HTML-страницу вместо JSON (HTTP {status}). Похоже, endpoint переадресован на обычную страницу DuckDuckGo или Chat API сейчас недоступен. Проверь URL и доступ к API в настройках; HTML страницы больше не будет показываться как ответ модели."
+        "DuckDuckGo Chat API вернул HTML-страницу вместо JSON (HTTP {status}). Похоже, endpoint переадресован на обычную страницу DuckDuckGo или Chat API сейчас недоступен. Проверь доступность Chat API и сетевые перенаправления; endpoint в этой версии MINUX IDE задан внутри приложения. HTML страницы больше не будет показываться как ответ модели."
     )
 }
 
@@ -482,6 +482,7 @@ fn request_assistant(
             payload["tool_choice"] = json!("auto");
         }
         let mut request = client.post(CHAT_URL)
+            .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .json(&payload);
         if !settings.token.trim().is_empty() {
