@@ -32,7 +32,20 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
         "tsx" => run_typescript(&selected, &root, true),
         "rs" => run_rust_source(&selected, &root),
         "cc" | "cpp" | "cxx" | "c++" => run_cpp_source(&selected, &root),
+        "s" | "asm" => run_assembly_source(&selected, &root),
         "go" => run_program("go", &[std::ffi::OsStr::new("run"), selected.as_os_str()], &root),
+        "cs" => run_csharp_project(&selected, &root),
+        "hs" | "lhs" => run_fallback("runghc", &[selected.as_os_str()], "runhaskell", &[selected.as_os_str()], &root),
+        "scala" | "sc" => run_program("scala", &[selected.as_os_str()], &root),
+        "jl" => run_program("julia", &[selected.as_os_str()], &root),
+        "zig" => run_program("zig", &[std::ffi::OsStr::new("run"), selected.as_os_str()], &root),
+        "clj" | "cljc" | "edn" => run_program("clojure", &[selected.as_os_str()], &root),
+        "erl" => run_program("escript", &[selected.as_os_str()], &root),
+        "ml" => run_program("ocaml", &[selected.as_os_str()], &root),
+        "d" => run_program("dmd", &[std::ffi::OsStr::new("-run"), selected.as_os_str()], &root),
+        "nix" => run_program("nix", &[std::ffi::OsStr::new("eval"), std::ffi::OsStr::new("--file"), selected.as_os_str()], &root),
+        "f" | "for" | "f77" | "f90" | "f95" | "f03" | "f08" => run_fortran_source(&selected, &root),
+        "tf" => run_terraform_validation(&selected, &root),
         "java" => run_program("java", &[selected.as_os_str()], &root),
         "rb" | "rake" => run_program("ruby", &[selected.as_os_str()], &root),
         "php" => run_program("php", &[selected.as_os_str()], &root),
@@ -58,7 +71,7 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
             run_make(&selected, &root)
         }
         _ => Err(format!(
-            "Для .{} пока нет команды запуска. Есть рантаймы Rust, C/C++, Go, Java, Kotlin, JS/TS, Python, Shell, PowerShell, Ruby, PHP, Lua, Perl, Swift, Elixir, R, Dart, F#, Groovy, CoffeeScript, Tcl, C, Make и XSLT.",
+            "Для .{} пока нет команды запуска. Есть рантаймы Rust, C/C++, Assembly, Go, C#, Java, Kotlin, JS/TS, Python, Shell, PowerShell, Ruby, PHP, Lua, Perl, Swift, Haskell, Scala, Julia, Zig, Clojure, Erlang, OCaml, D, Fortran, Nix, Elixir, R, Dart, F#, Groovy, CoffeeScript, Tcl, Make и XSLT; Terraform запускает validate проекта.",
             if extension.is_empty() { "unknown" } else { &extension }
         )),
     }
@@ -139,6 +152,69 @@ fn run_make(file: &Path, root: &Path) -> Result<String, String> {
     run_program("make", &[std::ffi::OsStr::new("-f"), file.as_os_str()], working_directory)
 }
 
+
+
+/// Compile and run one standalone assembly source through the installed C toolchain.
+fn run_assembly_source(file: &Path, root: &Path) -> Result<String, String> {
+    run_compiled_source(
+        "cc",
+        &[std::ffi::OsStr::new("-O2"), file.as_os_str()],
+        root,
+        "asm",
+        "Для запуска Assembly установи GCC/Clang (команда cc); файл должен содержать корректную точку входа.",
+    )
+}
+
+/// Compile and run one standalone Fortran source file.
+fn run_fortran_source(file: &Path, root: &Path) -> Result<String, String> {
+    run_compiled_source(
+        "gfortran",
+        &[std::ffi::OsStr::new("-O2"), file.as_os_str()],
+        root,
+        "fortran",
+        "Для запуска Fortran установи GNU Fortran (gfortran) и добавь его в PATH.",
+    )
+}
+
+/// C# files are run through the nearest project so project references and NuGet packages remain available.
+fn run_csharp_project(file: &Path, root: &Path) -> Result<String, String> {
+    let mut directory = file.parent().unwrap_or(root);
+    loop {
+        let project = fs::read_dir(directory).ok().and_then(|entries| {
+            entries.filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("csproj")))
+        });
+        if let Some(project) = project {
+            return run_program(
+                "dotnet",
+                &[
+                    std::ffi::OsStr::new("run"),
+                    std::ffi::OsStr::new("--project"),
+                    project.as_os_str(),
+                    std::ffi::OsStr::new("--no-launch-profile"),
+                ],
+                root,
+            );
+        }
+        if directory == root { break; }
+        let Some(parent) = directory.parent() else { break; };
+        if !parent.starts_with(root) { break; }
+        directory = parent;
+    }
+    Err("Для запуска C# открой файл внутри проекта .NET с файлом .csproj.".into())
+}
+
+/// Run validation for the Terraform project containing the selected .tf file.
+fn run_terraform_validation(file: &Path, root: &Path) -> Result<String, String> {
+    let project_dir = file.parent().unwrap_or(root);
+    let switch = std::ffi::OsString::from(format!("-chdir={}", project_dir.display()));
+    run_program(
+        "terraform",
+        &[switch.as_os_str(), std::ffi::OsStr::new("validate")],
+        root,
+    )
+}
 
 /// Compile and run a standalone Rust file. Cargo projects should be launched via their own workflow.
 fn run_rust_source(file: &Path, root: &Path) -> Result<String, String> {
