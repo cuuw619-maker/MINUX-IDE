@@ -1789,8 +1789,9 @@ impl MinuxIde {
         if let Some(path) = self.selected_file.clone() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).size(10.0).color(MUTED));
-                draw_icon(ui, &self.icons, "folder-open", 12.0, MUTED);
-                ui.label(RichText::new(path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy()).size(10.0).color(ACCENT));
+                draw_icon(ui, &self.icons, "folder-open", 14.0, MUTED);
+                ui.label(RichText::new(path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy()).size(10.0).color(ACCENT))
+                    .on_hover_text(path.display().to_string());
             });
             ui.add_space(5.0);
 
