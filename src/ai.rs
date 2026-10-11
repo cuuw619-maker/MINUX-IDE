@@ -849,7 +849,6 @@ fn project_language(path: &Path) -> Option<&'static str> {
         "ex" | "exs" => "Elixir",
         "erl" | "hrl" => "Erlang",
         "dart" => "Dart",
-        "toml" => "TOML",
         "mk" | "mak" | "make" => "Make",
         "vue" => "Vue",
         "svelte" => "Svelte",
