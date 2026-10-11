@@ -1763,12 +1763,14 @@ impl eframe::App for MinuxIde {
                 let ai = activity_button(ui, &self.icons, "bot", self.show_ai, "MINUX Agent", self.icon_size);
                 if ai.clicked() {
                     self.show_ai = !self.show_ai;
+                    if self.show_ai { self.settings_open = false; }
                 }
                 let mut settings_response = None;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     let settings = activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки", self.icon_size);
                     if settings.clicked() {
                         self.settings_open = !self.settings_open;
+                        if self.settings_open { self.show_ai = false; }
                     }
                     settings_response = Some(settings);
                     ui.add_space(6.0);
@@ -1802,8 +1804,9 @@ impl eframe::App for MinuxIde {
                     }
                 }
             });
+        let responsive_panel_max = ((ctx.screen_rect().width() - 370.0) / 2.0).clamp(240.0, 520.0);
         egui::SidePanel::left("workspace_sidebar")
-            .exact_width(self.sidebar_width.clamp(220.0, 520.0))
+            .exact_width(self.sidebar_width.clamp(220.0, responsive_panel_max))
             .resizable(false)
             .frame(egui::Frame::new()
                 .fill(PANEL)
@@ -1822,7 +1825,7 @@ impl eframe::App for MinuxIde {
         } else if self.show_ai { 1.0 } else { 0.0 };
         if self.show_ai || ai_panel_progress > 0.01 {
             egui::SidePanel::right("ai_sidebar")
-                .exact_width((self.ai_sidebar_width.clamp(240.0, 520.0) * ai_panel_progress).max(1.0))
+                .exact_width((self.ai_sidebar_width.clamp(240.0, responsive_panel_max) * ai_panel_progress).max(1.0))
                 .min_width(0.0)
                 .max_width(520.0)
                 .resizable(false)
