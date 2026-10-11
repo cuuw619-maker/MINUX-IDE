@@ -102,6 +102,7 @@ struct MinuxIde {
     ai_tx: Sender<AiEvent>,
     ai_rx: Receiver<AiEvent>,
     status: String,
+    api_base_url: String,
     api_key: String,
     model: String,
     thinking_enabled: bool,
@@ -144,7 +145,7 @@ impl Default for MinuxIde {
             chat_input: String::new(),
             chat_messages: vec![ChatEntry {
                 user: false,
-                content: "MINUX Agent готов. Выбери модель DuckDuckGo Chat API и отправь запрос. Токен можно оставить пустым, если endpoint разрешает анонимные обращения.".into(),
+                content: "MINUX Agent готов. Настрой Base URL OpenAI-совместимого API, выбери модель и отправь запрос. Токен обязателен только для тех провайдеров, которые его требуют.".into(),
                 reasoning: None,
             }],
             chat_history: Vec::new(),
@@ -171,6 +172,7 @@ impl Default for MinuxIde {
             ai_tx,
             ai_rx,
             status: "Выбери проект, чтобы начать".into(),
+            api_base_url: settings.api_base_url,
             api_key: settings.token,
             model: settings.model,
             thinking_enabled: settings.thinking_enabled,
@@ -284,10 +286,10 @@ fn icon_fallback_text(name: &str) -> &'static str {
     match name {
         "folder" => "DIR", "folder-open" => "OPEN", "file-code" => "</>",
         "file-text" => "TXT", "search" => "⌕", "puzzle" => "EXT", "bot" => "AI",
-        "settings-2" => "CFG", "save" => "SAVE", "terminal" => ">_",
-        "git-branch" => "GIT", "play" => "RUN", "send" => "↑",
+        "settings-2" => "CFG", "save" => "SV", "terminal" => "CLI",
+        "git-branch" => "GIT", "play" => "RUN", "send" => "GO",
         "key-round" => "KEY", "brain" => "AI", "cloud-download" => "↓",
-        "folder-plus" => "+D", "file-plus" => "+F", "refresh-cw" => "↻",
+        "folder-plus" => "+D", "file-plus" => "+F", "refresh-cw" => "RF", "search" => "SR",
         _ => "◇",
     }
 }
@@ -369,7 +371,12 @@ fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::Textur
     let mut icons = HashMap::with_capacity(assets.len() + 1);
     for (name, svg) in assets.into_iter().chain([("lang-yaml", include_str!("../assets/icons/lang-yaml.svg"))]) {
         let refined_svg = normalize_icon_svg(svg);
-        match egui_extras::image::load_svg_bytes(refined_svg.as_bytes()) {
+        // Rasterize every SVG at high resolution; the home hero uses icons up to 76 px.
+        // Rendering a 24x24 source bitmap at that size caused visible blur and jagged edges.
+        match egui_extras::image::load_svg_bytes_with_size(
+            refined_svg.as_bytes(),
+            Some(egui::SizeHint::Size(128, 128)),
+        ) {
             Ok(image) => {
                 icons.insert(name, ctx.load_texture(name, image, egui::TextureOptions::LINEAR));
             }
@@ -394,12 +401,21 @@ fn paint_icon_at(
             tint,
         );
     } else {
-        // Never leave an empty square if a bundled SVG is missing or malformed.
+        // Keep missing/malformed assets legible; use a rounded tile and a short ASCII monogram.
         let extent = rect.width().min(rect.height());
-        ui.painter().circle_filled(rect.center(), extent * 0.48, tint.gamma_multiply(0.12));
+        let fallback_rect = rect.shrink((extent * 0.04).clamp(0.5, 2.0));
+        let radius = (extent * 0.18).round().clamp(2.0, 9.0) as u8;
+        ui.painter().rect_filled(
+            fallback_rect,
+            egui::CornerRadius::same(radius),
+            tint.gamma_multiply(0.14),
+        );
         ui.painter().text(
-            rect.center(), egui::Align2::CENTER_CENTER, icon_fallback_text(name),
-            egui::FontId::proportional((extent * 0.42).max(8.0)), tint,
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon_fallback_text(name),
+            egui::FontId::proportional((extent * 0.31).clamp(6.0, 15.0)),
+            tint,
         );
     }
 }
@@ -421,12 +437,18 @@ fn toolbar_icon_button(
     name: &str,
     selected: bool,
     tooltip: &str,
+    animations_enabled: bool,
+    animation_speed: f32,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 32.0), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
-    let hover_raw = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
-    let hover_t = unsafe { minux_ease_out_cubic(hover_raw) };
+    let hover_target = response.hovered() || selected;
+    let hover_t = if animations_enabled {
+        let duration = 0.13 / animation_speed.clamp(0.5, 2.0);
+        let raw = ui.ctx().animate_bool_with_time(response.id.with("hover"), hover_target, duration);
+        unsafe { minux_ease_out_cubic(raw) }
+    } else if hover_target { 1.0 } else { 0.0 };
     if hover_t > 0.01 {
         let background = if selected { accent_bg } else { PANEL_RAISED };
         ui.painter().rect_filled(rect, egui::CornerRadius::same(5), background.gamma_multiply(hover_t));
@@ -558,7 +580,7 @@ impl MinuxIde {
             draw_icon(ui, &self.icons, "folder-open", 18.0, accent);
             ui.label(RichText::new("MINUX  /  WORKSPACE").size(11.0).strong().color(MUTED));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки").clicked() {
+                if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки", self.animations_enabled, self.animation_speed).clicked() {
                     self.settings_open = true;
                 }
             });
@@ -767,6 +789,7 @@ impl MinuxIde {
 
     fn current_ai_settings(&self) -> ai::AiSettings {
         ai::AiSettings {
+            api_base_url: self.api_base_url.clone(),
             token: self.api_key.clone(),
             model: self.model.clone(),
             thinking_enabled: self.thinking_enabled,
@@ -804,18 +827,19 @@ impl MinuxIde {
 
     fn save_ai_settings(&mut self) {
         match ai::save_settings(&self.current_ai_settings()) {
-            Ok(()) => self.status = "Настройки DuckDuckGo Chat API сохранены локально".into(),
+            Ok(()) => self.status = "Настройки AI API сохранены локально".into(),
             Err(error) => self.status = error,
         }
     }
 
     fn fetch_endpoint_models(&mut self) {
+        let api_base_url = self.api_base_url.clone();
         let token = self.api_key.clone();
         let tx = self.ai_tx.clone();
         self.models_loading = true;
-        self.status = "Запрашиваю каталог DuckDuckGo Chat API…".into();
+        self.status = "Запрашиваю каталог моделей…".into();
         thread::spawn(move || {
-            let result = ai::fetch_models(&token);
+            let result = ai::fetch_models(&api_base_url, &token);
             let _ = tx.send(AiEvent::ModelsFinished(result));
         });
     }
@@ -978,15 +1002,15 @@ impl MinuxIde {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("ПРОВОДНИК").size(10.0).strong().color(MUTED));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toolbar_icon_button(ui, &self.icons, "refresh-cw", false, "Пересканировать проект").clicked() {
+                        if toolbar_icon_button(ui, &self.icons, "refresh-cw", false, "Пересканировать проект", self.animations_enabled, self.animation_speed).clicked() {
                             self.start_workspace_scan();
                         }
-                        if toolbar_icon_button(ui, &self.icons, "folder-plus", false, "Создать папку в корне").clicked() {
+                        if toolbar_icon_button(ui, &self.icons, "folder-plus", false, "Создать папку в корне", self.animations_enabled, self.animation_speed).clicked() {
                             self.new_item_open = true;
                             self.new_item_is_folder = true;
                             self.new_item_name.clear();
                         }
-                        if toolbar_icon_button(ui, &self.icons, "file-plus", false, "Создать файл в корне").clicked() {
+                        if toolbar_icon_button(ui, &self.icons, "file-plus", false, "Создать файл в корне", self.animations_enabled, self.animation_speed).clicked() {
                             self.new_item_open = true;
                             self.new_item_is_folder = false;
                             self.new_item_name.clear();
@@ -1246,7 +1270,7 @@ impl MinuxIde {
         ui.horizontal(|ui| {
             ui.label(RichText::new(if self.thinking_enabled { "Режим тщательного анализа: вкл." } else { "Режим тщательного анализа: выкл." }).size(10.0).color(MUTED));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки модели").clicked() {
+                if toolbar_icon_button(ui, &self.icons, "settings-2", false, "Настройки модели", self.animations_enabled, self.animation_speed).clicked() {
                     self.settings_open = true;
                 }
             });
@@ -1262,7 +1286,7 @@ impl MinuxIde {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Ctrl+Enter для отправки").size(9.0).color(MUTED));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let send_clicked = toolbar_icon_button(ui, &self.icons, "send", false, if self.ai_pending { "Запрос выполняется" } else { "Отправить сообщение" }).clicked();
+                let send_clicked = toolbar_icon_button(ui, &self.icons, "send", false, if self.ai_pending { "Запрос выполняется" } else { "Отправить сообщение" }, self.animations_enabled, self.animation_speed).clicked();
                 let send_enter = response.lost_focus()
                     && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
                 if (send_clicked || send_enter) && !self.chat_input.trim().is_empty() && !self.ai_pending {
@@ -1294,20 +1318,27 @@ impl MinuxIde {
         ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new("DUCKDUCKGO CHAT API").size(10.0).strong().color(self.accent_color()));
+        ui.label(RichText::new("AI API / OPENAI-СОВМЕСТИМЫЙ").size(10.0).strong().color(self.accent_color()));
+        ui.add_space(8.0);
+        ui.label(RichText::new("Base URL API").size(12.0).color(TEXT));
+        ui.add_sized(
+            [ui.available_width().min(460.0), 34.0],
+            egui::TextEdit::singleline(&mut self.api_base_url)
+                .hint_text("https://provider.example/v1"),
+        );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             draw_icon(ui, &self.icons, "key-round", 16.0, self.accent_color());
-            ui.label(RichText::new("API-токен (необязательно)").size(12.0).color(TEXT));
+            ui.label(RichText::new("API-токен (если требуется)").size(12.0).color(TEXT));
         });
         ui.add_sized(
             [ui.available_width().min(460.0), 34.0],
             egui::TextEdit::singleline(&mut self.api_key)
                 .password(true)
-                .hint_text("Оставь пустым, если API не требует токен"),
+                .hint_text("Токен провайдера; необязательно для анонимного API"),
         );
         ui.add_space(5.0);
-        ui.label(RichText::new("Запросы отправляются на duckduckgo.com/duckduckgo-html-api/v1/chat/completions. Токен необязателен; введённый токен хранится локально без шифрования.").size(10.0).color(ORANGE));
+        ui.label(RichText::new("Ожидаются OpenAI-совместимые /chat/completions и /models. Старый endpoint DuckDuckGo, если возвращает HTTP 410, отключён на стороне сервиса: укажи актуальный Base URL. Токен хранится локально без шифрования.").size(10.0).color(ORANGE));
         ui.add_space(16.0);
         ui.separator();
         ui.label(RichText::new("ОФОРМЛЕНИЕ").size(10.0).strong().color(self.accent_color()));
@@ -1411,7 +1442,7 @@ impl MinuxIde {
         settings_row(ui, "Syntax highlighting", "Syntect", GREEN);
         settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native C core", &format!("C · v{}", unsafe { minux_engine_version() }), GREEN);
-        settings_row(ui, "AI endpoint", "DuckDuckGo HTML Chat API", GREEN);
+        settings_row(ui, "AI endpoint", "Настраиваемый OpenAI-compatible API", GREEN);
         settings_row(ui, "Compiled + JVM", "Rust · C/C++ · Assembly · Fortran · Go · C# · Java/Kotlin · JS/TS · Python", GREEN);
         settings_row(ui, "Script engines", "Shell/PowerShell · Ruby/PHP · Lua/Perl · Swift · Haskell/Scala · Julia/Zig", GREEN);
         settings_row(ui, "Project tools", "Clojure · Erlang · OCaml · D · Nix · F# · Tcl · Make · XSLT · Terraform", GREEN);
@@ -1700,16 +1731,16 @@ impl eframe::App for MinuxIde {
                             self.settings_open = false;
                         }
                     }
-                    if toolbar_icon_button(ui, &self.icons, "folder-open", false, "Открыть проект").clicked() {
+                    if toolbar_icon_button(ui, &self.icons, "folder-open", false, "Открыть проект", self.animations_enabled, self.animation_speed).clicked() {
                         self.open_workspace();
                     }
-                    if toolbar_icon_button(ui, &self.icons, "play", false, if self.run_pending { "Выполняется…" } else { "Запустить выбранный файл" }).clicked() && !self.run_pending {
+                    if toolbar_icon_button(ui, &self.icons, "play", false, if self.run_pending { "Выполняется…" } else { "Запустить выбранный файл" }, self.animations_enabled, self.animation_speed).clicked() && !self.run_pending {
                         self.run_selected_file();
                     }
-                    if toolbar_icon_button(ui, &self.icons, "save", false, "Сохранить файл").clicked() {
+                    if toolbar_icon_button(ui, &self.icons, "save", false, "Сохранить файл", self.animations_enabled, self.animation_speed).clicked() {
                         self.save_file();
                     }
-                    if toolbar_icon_button(ui, &self.icons, "folder-plus", false, "Начальный экран / другой проект").clicked() {
+                    if toolbar_icon_button(ui, &self.icons, "folder-plus", false, "Начальный экран / другой проект", self.animations_enabled, self.animation_speed).clicked() {
                         self.return_to_home();
                     }
                 });
@@ -1723,7 +1754,7 @@ impl eframe::App for MinuxIde {
                     ui.label(RichText::new("◆").size(10.0).color(ACCENT));
                     ui.label(RichText::new(self.status.clone()).size(10.0).color(TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toolbar_icon_button(ui, &self.icons, "terminal", self.show_output, if self.show_output { "Скрыть вывод" } else { "Показать вывод" }).clicked() {
+                        if toolbar_icon_button(ui, &self.icons, "terminal", self.show_output, if self.show_output { "Скрыть вывод" } else { "Показать вывод" }, self.animations_enabled, self.animation_speed).clicked() {
                             self.show_output = !self.show_output;
                         }
                         draw_icon(ui, &self.icons, "git-branch", 13.0, Color32::WHITE);
@@ -1746,30 +1777,30 @@ impl eframe::App for MinuxIde {
             .frame(egui::Frame::new().fill(RAIL_BG).stroke(Stroke::new(1.0_f32, BORDER)))
             .show(ctx, |ui| {
                 ui.add_space(10.0);
-                let explorer = activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник", self.icon_size);
+                let explorer = activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник", self.icon_size, self.animations_enabled, self.animation_speed);
                 if explorer.clicked() {
                     self.sidebar_view = SidebarView::Explorer;
                     self.settings_open = false;
                 }
-                let search = activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов", self.icon_size);
+                let search = activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов", self.icon_size, self.animations_enabled, self.animation_speed);
                 if search.clicked() {
                     self.sidebar_view = SidebarView::Search;
                     self.settings_open = false;
                 }
-                let extensions = activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики", self.icon_size);
+                let extensions = activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики", self.icon_size, self.animations_enabled, self.animation_speed);
                 if extensions.clicked() {
                     self.sidebar_view = SidebarView::Extensions;
                     self.settings_open = false;
                 }
                 ui.add_space(7.0);
-                let ai = activity_button(ui, &self.icons, "bot", self.show_ai, "MINUX Agent", self.icon_size);
+                let ai = activity_button(ui, &self.icons, "bot", self.show_ai, "MINUX Agent", self.icon_size, self.animations_enabled, self.animation_speed);
                 if ai.clicked() {
                     self.show_ai = !self.show_ai;
                     if self.show_ai { self.settings_open = false; }
                 }
                 let mut settings_response = None;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    let settings = activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки", self.icon_size);
+                    let settings = activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки", self.icon_size, self.animations_enabled, self.animation_speed);
                     if settings.clicked() {
                         self.settings_open = !self.settings_open;
                         if self.settings_open { self.show_ai = false; }
@@ -1891,13 +1922,19 @@ fn activity_button(
     selected: bool,
     tooltip: &str,
     icon_size: f32,
+    animations_enabled: bool,
+    animation_speed: f32,
 ) -> egui::Response {
     let button_size = ui.available_width().min(46.0).max(38.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
-    let hover_raw = ui.ctx().animate_bool(response.id.with("hover"), response.hovered() || selected);
-    let hover_t = unsafe { minux_ease_out_quint(hover_raw) };
+    let hover_target = response.hovered() || selected;
+    let hover_t = if animations_enabled {
+        let duration = 0.15 / animation_speed.clamp(0.5, 2.0);
+        let raw = ui.ctx().animate_bool_with_time(response.id.with("hover"), hover_target, duration);
+        unsafe { minux_ease_out_quint(raw) }
+    } else if hover_target { 1.0 } else { 0.0 };
     if hover_t > 0.01 {
         ui.painter().rect_filled(rect, egui::CornerRadius::same(5),
             (if selected { accent_bg } else { PANEL_RAISED }).gamma_multiply(hover_t));
