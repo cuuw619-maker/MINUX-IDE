@@ -271,26 +271,31 @@ fn normalize_icon_svg(svg: &str) -> String {
 fn icon_fallback_text(name: &str) -> &'static str {
     if let Some(language) = name.strip_prefix("lang-") {
         return match language {
+            "c" => "C", "cplusplus" => "C++", "csharp" => "C#", "objective-c" => "ObjC",
             "rust" => "Rs", "typescript" => "TS", "javascript" => "JS", "python" => "Py",
-            "cplusplus" => "C++", "csharp" => "C#", "objective-c" => "ObjC",
-            "powershell" => "PS", "graphql" => "GQL", "terraform" => "TF",
-            "fortran" => "F", "haskell" => "Hs", "clojure" => "Clj", "erlang" => "Erl",
-            "elixir" => "Ex", "kotlin" => "Kt", "julia" => "Jl", "solidity" => "Sol",
-            "matlab" => "Mat", "fsharp" => "F#", "assembly" => "ASM", "coffeescript" => "CS",
-            "tcl" => "Tcl", "latex" => "TeX", "diff" => "DIFF", "toml" => "TOML",
-            "html5" => "HTML", "css3" => "CSS",
-            other if !other.is_empty() => "DEV",
+            "bash" => "Sh", "xml" => "XM", "html5" => "HT", "json" => "JSN",
+            "make" => "Mk", "css3" => "CS", "go" => "Go", "java" => "Jv",
+            "php" => "PH", "ruby" => "Rb", "swift" => "Sw", "kotlin" => "Kt",
+            "lua" => "Lu", "sql" => "SQL", "dart" => "Dr", "perl" => "Pl",
+            "r" => "R", "scala" => "Sc", "haskell" => "Hs", "clojure" => "Cl",
+            "erlang" => "Er", "elixir" => "Ex", "vue" => "Vu", "svelte" => "Sv",
+            "docker" => "Dk", "powershell" => "Ps", "graphql" => "GQ",
+            "cmake" => "CM", "fsharp" => "F#", "d" => "D", "julia" => "Jl",
+            "zig" => "Zg", "solidity" => "So", "terraform" => "TF", "nix" => "Nx",
+            "fortran" => "Fr", "ocaml" => "OC", "matlab" => "Mt", "assembly" => "As",
+            "coffeescript" => "CS", "tcl" => "Tc", "latex" => "Te", "diff" => "Df",
+            "toml" => "Tm", "yaml" => "Ym",
             _ => "DEV",
         };
     }
     match name {
         "folder" => "DIR", "folder-open" => "OPEN", "file-code" => "</>",
-        "file-text" => "TXT", "search" => "⌕", "puzzle" => "EXT", "bot" => "AI",
+        "file-text" => "TXT", "search" => "SR", "puzzle" => "EXT", "bot" => "AI",
         "settings-2" => "CFG", "save" => "SV", "terminal" => "CLI",
         "git-branch" => "GIT", "play" => "RUN", "send" => "GO",
-        "key-round" => "KEY", "brain" => "AI", "cloud-download" => "↓",
-        "folder-plus" => "+D", "file-plus" => "+F", "refresh-cw" => "RF", "search" => "SR",
-        _ => "◇",
+        "key-round" => "KEY", "brain" => "AI", "cloud-download" => "DL",
+        "folder-plus" => "+D", "file-plus" => "+F", "refresh-cw" => "RF",
+        _ => "UI",
     }
 }
 
@@ -1873,24 +1878,45 @@ impl eframe::App for MinuxIde {
                     self.draw_settings(ui);
                 } else {
                     let available = ui.available_size();
-                    if self.show_output {
-                        let editor_height = (available.y - self.output_panel_height.clamp(120.0, 480.0)).max(160.0);
+                    let output_panel_progress = if self.animations_enabled {
+                        let duration = 0.24 / self.animation_speed.clamp(0.5, 2.0);
+                        let raw = ctx.animate_bool_with_time(
+                            egui::Id::new("minux-output-panel-open"),
+                            self.show_output,
+                            duration,
+                        );
+                        if self.show_output {
+                            unsafe { minux_ease_out_quint(raw) }
+                        } else {
+                            unsafe { minux_ease_in_out_cubic(raw) }
+                        }
+                    } else if self.show_output { 1.0 } else { 0.0 };
+                    if self.show_output || output_panel_progress > 0.01 {
+                        let panel_height = self.output_panel_height.clamp(120.0, 480.0) * output_panel_progress;
+                        let split_height = 7.0 * output_panel_progress;
+                        let editor_height = (available.y - panel_height - split_height).max(120.0);
                         ui.allocate_ui_with_layout(
                             egui::vec2(available.x, editor_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| self.draw_editor_workspace(ui),
                         );
-                        let split = ui.allocate_response(egui::vec2(ui.available_width(), 7.0), egui::Sense::drag());
+                        let split = ui.allocate_response(
+                            egui::vec2(ui.available_width(), split_height.max(1.0)),
+                            egui::Sense::drag(),
+                        );
                         if split.dragged() {
                             self.output_panel_height = (self.output_panel_height - split.drag_delta().y).clamp(120.0, 480.0);
                         }
                         if split.hovered() || split.dragged() {
                             ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
                         }
-                        ui.painter().rect_filled(
-                            split.rect.shrink2(egui::vec2(0.0, 2.5)), egui::CornerRadius::same(2),
-                            if split.hovered() || split.dragged() { self.accent_color() } else { BORDER },
-                        );
+                        if split_height > 0.5 {
+                            ui.painter().rect_filled(
+                                split.rect.shrink2(egui::vec2(0.0, 2.5_f32.min(split_height * 0.35))),
+                                egui::CornerRadius::same(2),
+                                if split.hovered() || split.dragged() { self.accent_color() } else { BORDER },
+                            );
+                        }
                         self.draw_output_panel(ui);
                     } else {
                         self.draw_editor_workspace(ui);
@@ -1900,6 +1926,17 @@ impl eframe::App for MinuxIde {
         if self.animations_enabled && view_progress < 0.999 {
             paint_transition_overlay(ctx, ((1.0 - view_progress) * 68.0) as u8);
             ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if self.animations_enabled {
+            let target = if self.show_output { 1.0 } else { 0.0 };
+            let progress = ctx.animate_bool_with_time(
+                egui::Id::new("minux-output-panel-open"),
+                self.show_output,
+                0.24 / self.animation_speed.clamp(0.5, 2.0),
+            );
+            if (progress - target).abs() > 0.01 {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
         }
     }
 }
