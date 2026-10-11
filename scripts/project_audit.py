@@ -2,6 +2,7 @@
 """Dependency-free audit of MINUX's polyglot source tree and embedded SVG assets."""
 from __future__ import annotations
 
+import json
 import re
 import sys
 from collections import Counter
@@ -85,12 +86,15 @@ def audit_embedded_icons(root: Path, main_rs: str) -> list[str]:
     missing_files = sorted({path for path in icon_paths if not (root / "assets" / "icons" / path).is_file()})
     if missing_files:
         return [f"missing embedded SVG: assets/icons/{path}" for path in missing_files]
+    duplicates = sorted({path for path in icon_paths if icon_paths.count(path) > 1})
+    if duplicates:
+        return [f"SVG embedded more than once: assets/icons/{path}" for path in duplicates]
 
     mapped_block = main_rs.split("fn file_icon_key_for_path", 1)
     if len(mapped_block) != 2:
         return ["file_icon_key_for_path mapping is missing"]
     mapped_block = mapped_block[1].split("fn syntax_selector_for_path", 1)[0]
-    mapped_keys = set(re.findall(r'=>\s*"(lang-[\w-]+)"', mapped_block))
+    mapped_keys = set(re.findall(r'(?:=>|return)\s*"(lang-[\w-]+)"', mapped_block))
     registered_keys = set(re.findall(r'\("(lang-[\w-]+)",\s*include_str!', main_rs))
     unregistered = sorted(mapped_keys - registered_keys)
     return [f"mapped language icon is not embedded: {key}" for key in unregistered]
@@ -122,14 +126,16 @@ def main() -> int:
             if suffix in extensions:
                 counts[language] += 1
 
-    print(
+    print(json.dumps(
         {
             "status": "ok",
             "embedded_svg_references": len(re.findall(r'include_str!\("\.\./assets/icons/([^"]+\.svg)"\)', main_rs)),
             "languages_with_source_inventory": sum(count > 0 for count in counts.values()),
             "languages": dict(sorted(counts.items())),
-        }
-    )
+        },
+        ensure_ascii=False,
+        indent=2,
+    ))
     return 0
 
 
