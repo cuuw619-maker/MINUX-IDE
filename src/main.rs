@@ -91,8 +91,9 @@ struct MinuxIde {
     animation_speed: f32,
     ui_scale: f32,
     sidebar_width: f32,
+    ai_sidebar_width: f32,
+    output_panel_height: f32,
     icon_size: f32,
-    sidebar_transition_state: bool,
     new_item_open: bool,
     new_item_is_folder: bool,
     new_item_name: String,
@@ -158,9 +159,10 @@ impl Default for MinuxIde {
             animations_enabled: settings.animations_enabled,
             animation_speed: settings.animation_speed.clamp(0.5, 2.0),
             ui_scale: settings.ui_scale.clamp(0.75, 1.50),
-            sidebar_width: settings.sidebar_width.clamp(220.0, 420.0),
+            sidebar_width: settings.sidebar_width.clamp(220.0, 520.0),
+            ai_sidebar_width: settings.ai_sidebar_width.clamp(240.0, 520.0),
+            output_panel_height: settings.output_panel_height.clamp(120.0, 480.0),
             icon_size: settings.icon_size.clamp(14.0, 28.0),
-            sidebar_transition_state: false,
             new_item_open: false,
             new_item_is_folder: false,
             new_item_name: String::new(),
@@ -189,8 +191,10 @@ impl Default for MinuxIde {
 
 fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius: u8) {
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(7.0, 6.0);
-    style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.interact_size.y = 30.0;
+    style.animation_time = 0.18;
 
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = BG;
@@ -200,17 +204,87 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
     visuals.code_bg_color = EDITOR_BG;
     visuals.hyperlink_color = accent;
     visuals.selection.bg_fill = accent_bg;
-    visuals.selection.stroke = Stroke::new(1.0_f32, accent);
+    visuals.selection.stroke = Stroke::new(1.25, accent);
     visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.active.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.open.corner_radius = egui::CornerRadius::same(radius);
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+
+    // MINUX surfaces are dark, softly outlined, and acquire an accent edge on hover.
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(29, 33, 43);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
     visuals.widgets.hovered.bg_fill = accent_bg;
-    visuals.widgets.active.bg_fill = accent_bg;
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.82));
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
+    visuals.widgets.active.bg_fill = accent.gamma_multiply(0.30);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.4, accent);
+    visuals.widgets.active.fg_stroke = Stroke::new(1.1, Color32::WHITE);
+    visuals.widgets.open.bg_fill = PANEL_RAISED;
+    visuals.widgets.open.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.7));
     style.visuals = visuals;
     ctx.set_style(style);
+}
+
+fn normalize_svg_color_attribute(svg: &str, attribute: &str) -> String {
+    let needle = format!("{attribute}=\"");
+    let mut output = String::with_capacity(svg.len());
+    let mut cursor = 0;
+    while cursor < svg.len() {
+        let Some(relative_start) = svg[cursor..].find(&needle) else {
+            output.push_str(&svg[cursor..]);
+            break;
+        };
+        let start = cursor + relative_start;
+        let value_start = start + needle.len();
+        let Some(relative_end) = svg[value_start..].find('\"') else {
+            output.push_str(&svg[cursor..]);
+            break;
+        };
+        let end = value_start + relative_end;
+        output.push_str(&svg[cursor..value_start]);
+        let value = &svg[value_start..end];
+        if matches!(value.to_ascii_lowercase().as_str(), "none" | "transparent")
+            || value.starts_with("url(")
+        {
+            output.push_str(value);
+        } else {
+            output.push_str("#FFFFFF");
+        }
+        cursor = end;
+    }
+    output
+}
+
+fn normalize_icon_svg(svg: &str) -> String {
+    let svg = svg.replace("currentColor", "#FFFFFF")
+        .replace("stroke-width=\"2\"", "stroke-width=\"1.7\"");
+    normalize_svg_color_attribute(&normalize_svg_color_attribute(&svg, "stroke"), "fill")
+}
+
+fn icon_fallback_text(name: &str) -> &'static str {
+    if let Some(language) = name.strip_prefix("lang-") {
+        return match language {
+            "rust" => "Rs", "typescript" => "TS", "javascript" => "JS", "python" => "Py",
+            "cplusplus" => "C++", "csharp" => "C#", "objective-c" => "ObjC",
+            "powershell" => "PS", "graphql" => "GQL", "terraform" => "TF",
+            "fortran" => "F", "haskell" => "Hs", "clojure" => "Clj", "erlang" => "Erl",
+            "elixir" => "Ex", "kotlin" => "Kt", "julia" => "Jl", "solidity" => "Sol",
+            "matlab" => "Mat", "fsharp" => "F#", "html5" => "HTML", "css3" => "CSS",
+            other if !other.is_empty() => "DEV",
+            _ => "DEV",
+        };
+    }
+    match name {
+        "folder" => "DIR", "folder-open" => "OPEN", "file-code" => "</>",
+        "file-text" => "TXT", "search" => "⌕", "puzzle" => "EXT", "bot" => "AI",
+        "settings-2" => "CFG", "save" => "SAVE", "terminal" => ">_",
+        "git-branch" => "GIT", "play" => "RUN", "send" => "↑",
+        "key-round" => "KEY", "brain" => "AI", "cloud-download" => "↓",
+        "folder-plus" => "+D", "file-plus" => "+F", "refresh-cw" => "↻",
+        _ => "◇",
+    }
 }
 
 fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::TextureHandle> {
@@ -283,7 +357,7 @@ fn load_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::Textur
     ];
     let mut icons = HashMap::with_capacity(assets.len() + 1);
     for (name, svg) in assets.into_iter().chain([("lang-yaml", include_str!("../assets/icons/lang-yaml.svg"))]) {
-        let refined_svg = svg.replace("stroke-width=\"2\"", "stroke-width=\"1.45\"");
+        let refined_svg = normalize_icon_svg(svg);
         match egui_extras::image::load_svg_bytes(refined_svg.as_bytes()) {
             Ok(image) => {
                 icons.insert(name, ctx.load_texture(name, image, egui::TextureOptions::LINEAR));
@@ -307,6 +381,14 @@ fn paint_icon_at(
             rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             tint,
+        );
+    } else {
+        // Never leave an empty square if a bundled SVG is missing or malformed.
+        let extent = rect.width().min(rect.height());
+        ui.painter().circle_filled(rect.center(), extent * 0.48, tint.gamma_multiply(0.12));
+        ui.painter().text(
+            rect.center(), egui::Align2::CENTER_CENTER, icon_fallback_text(name),
+            egui::FontId::proportional((extent * 0.42).max(8.0)), tint,
         );
     }
 }
@@ -687,6 +769,8 @@ impl MinuxIde {
             animation_speed: self.animation_speed,
             ui_scale: self.ui_scale,
             sidebar_width: self.sidebar_width,
+            ai_sidebar_width: self.ai_sidebar_width,
+            output_panel_height: self.output_panel_height,
             icon_size: self.icon_size,
         }
     }
@@ -1053,6 +1137,19 @@ impl MinuxIde {
             ui.label(RichText::new("LOCAL").size(9.0).color(GREEN));
         });
         ui.label(RichText::new(self.root.to_string_lossy()).size(10.0).color(MUTED));
+        let bounds = ui.max_rect();
+        let handle = egui::Rect::from_min_max(
+            egui::pos2(bounds.right() - 5.0, bounds.top()),
+            egui::pos2(bounds.right(), bounds.bottom()),
+        );
+        let resize = ui.interact(handle, egui::Id::new("minux-sidebar-width-grip"), egui::Sense::drag());
+        if resize.dragged() {
+            self.sidebar_width = (self.sidebar_width + resize.drag_delta().x).clamp(220.0, 520.0);
+        }
+        if resize.hovered() || resize.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            ui.painter().rect_filled(handle, egui::CornerRadius::same(1), self.accent_color().gamma_multiply(0.45));
+        }
     }
 
     fn draw_ai_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -1155,6 +1252,19 @@ impl MinuxIde {
                 }
             });
         });
+        let bounds = ui.max_rect();
+        let handle = egui::Rect::from_min_max(
+            egui::pos2(bounds.left(), bounds.top()),
+            egui::pos2(bounds.left() + 5.0, bounds.bottom()),
+        );
+        let resize = ui.interact(handle, egui::Id::new("minux-ai-sidebar-width-grip"), egui::Sense::drag());
+        if resize.dragged() {
+            self.ai_sidebar_width = (self.ai_sidebar_width - resize.drag_delta().x).clamp(240.0, 520.0);
+        }
+        if resize.hovered() || resize.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            ui.painter().rect_filled(handle, egui::CornerRadius::same(1), self.accent_color().gamma_multiply(0.45));
+        }
     }
 
     fn draw_settings(&mut self, ui: &mut egui::Ui) {
@@ -1207,7 +1317,9 @@ impl MinuxIde {
         ui.add(egui::Slider::new(&mut self.editor_font_size, 11.0..=30.0).step_by(0.5).text("Размер шрифта редактора"));
         ui.add(egui::Slider::new(&mut self.animation_speed, 0.5..=2.0).step_by(0.1).text("Скорость переходов"));
         ui.add(egui::Slider::new(&mut self.ui_scale, 0.75..=1.50).step_by(0.05).text("Масштаб интерфейса"));
-        ui.add(egui::Slider::new(&mut self.sidebar_width, 220.0..=420.0).step_by(10.0).text("Ширина боковой панели"));
+        ui.add(egui::Slider::new(&mut self.sidebar_width, 220.0..=520.0).step_by(10.0).text("Ширина проводника"));
+        ui.add(egui::Slider::new(&mut self.ai_sidebar_width, 240.0..=520.0).step_by(10.0).text("Ширина AI-панели"));
+        ui.add(egui::Slider::new(&mut self.output_panel_height, 120.0..=480.0).step_by(10.0).text("Высота панели вывода"));
         ui.add(egui::Slider::new(&mut self.icon_size, 14.0..=28.0).step_by(1.0).text("Размер иконок"));
         ui.checkbox(&mut self.animations_enabled, "Анимации панелей");
         ui.add_space(12.0);
@@ -1269,14 +1381,6 @@ impl MinuxIde {
             if ui.button("Проверить связь / обновить модели").clicked() {
                 self.fetch_endpoint_models();
             }
-            if ui.button(if self.show_home { "Сначала выбери проект" } else { "Открыть AI-панель" }).clicked() {
-                self.settings_open = false;
-                if self.show_home {
-                    self.status = "Сначала выбери проект на начальном экране.".into();
-                } else {
-                    self.show_ai = true;
-                }
-            }
         });
         ui.add_space(8.0);
         ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
@@ -1289,7 +1393,7 @@ impl MinuxIde {
         settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native C core", &format!("C · v{}", unsafe { minux_engine_version() }), GREEN);
         settings_row(ui, "AI endpoint", "DuckDuckGo HTML Chat API", GREEN);
-        settings_row(ui, "Runtime", "TypeScript · JS · Python · Shell · C · Make · XSLT", GREEN);
+        settings_row(ui, "Runtime", "Rust · C/C++ · Go · Java · Kotlin · JS/TS · Python · Shell · Ruby · Lua · PHP · Swift", GREEN);
         ui.add_space(8.0);
         ui.label(RichText::new("Файловая структура сканируется в отдельном потоке; отображение дерева виртуализировано.").size(11.0).color(MUTED));
         ui.add_space(10.0);
@@ -1560,7 +1664,7 @@ impl eframe::App for MinuxIde {
                     ui.separator();
                     ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).size(11.0).color(MUTED));
                     ui.add_space(6.0);
-                    let reserved_width = 3.0 * 40.0 + 4.0 * 7.0 + 165.0;
+                    let reserved_width = 4.0 * 40.0 + 4.0 * 7.0 + 165.0;
                     let search_width = (ui.available_width() - reserved_width).clamp(150.0, 310.0);
                     let command_search = ui.add_sized(
                         [search_width, 29.0],
@@ -1583,9 +1687,6 @@ impl eframe::App for MinuxIde {
                     }
                     if toolbar_icon_button(ui, &self.icons, "save", false, "Сохранить файл").clicked() {
                         self.save_file();
-                    }
-                    if toolbar_icon_button(ui, &self.icons, "bot", self.show_ai, "AI Agent").clicked() {
-                        self.show_ai = !self.show_ai;
                     }
                     if toolbar_icon_button(ui, &self.icons, "folder-plus", false, "Начальный экран / другой проект").clicked() {
                         self.return_to_home();
@@ -1624,64 +1725,72 @@ impl eframe::App for MinuxIde {
             .frame(egui::Frame::new().fill(RAIL_BG).stroke(Stroke::new(1.0_f32, BORDER)))
             .show(ctx, |ui| {
                 ui.add_space(10.0);
-                if activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник", self.icon_size) .clicked() {
-                    self.sidebar_transition_state = !self.sidebar_transition_state;
+                let explorer = activity_button(ui, &self.icons, "folder", self.sidebar_view == SidebarView::Explorer && !self.settings_open, "Проводник", self.icon_size);
+                if explorer.clicked() {
                     self.sidebar_view = SidebarView::Explorer;
                     self.settings_open = false;
                 }
-                if activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов", self.icon_size) .clicked() {
-                    self.sidebar_transition_state = !self.sidebar_transition_state;
+                let search = activity_button(ui, &self.icons, "search", self.sidebar_view == SidebarView::Search && !self.settings_open, "Поиск файлов", self.icon_size);
+                if search.clicked() {
                     self.sidebar_view = SidebarView::Search;
                     self.settings_open = false;
                 }
-                if activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики", self.icon_size) .clicked() {
-                    self.sidebar_transition_state = !self.sidebar_transition_state;
+                let extensions = activity_button(ui, &self.icons, "puzzle", self.sidebar_view == SidebarView::Extensions && !self.settings_open, "Языки и грамматики", self.icon_size);
+                if extensions.clicked() {
                     self.sidebar_view = SidebarView::Extensions;
                     self.settings_open = false;
                 }
                 ui.add_space(7.0);
-                if activity_button(ui, &self.icons, "bot", self.show_ai, "AI Agent", self.icon_size) .clicked() {
+                let ai = activity_button(ui, &self.icons, "bot", self.show_ai, "MINUX Agent", self.icon_size);
+                if ai.clicked() {
                     self.show_ai = !self.show_ai;
                 }
+                let mut settings_response = None;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    if activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки", self.icon_size) .clicked() {
-                        self.sidebar_transition_state = !self.sidebar_transition_state;
+                    let settings = activity_button(ui, &self.icons, "settings-2", self.settings_open, "Настройки", self.icon_size);
+                    if settings.clicked() {
                         self.settings_open = !self.settings_open;
                     }
+                    settings_response = Some(settings);
                     ui.add_space(6.0);
                 });
-            });
 
-        let sidebar_transition = if self.animations_enabled {
-            let duration = 0.24 / self.animation_speed.clamp(0.5, 2.0);
-            let raw = ctx.animate_bool_with_time(
-                egui::Id::new("minux-left-sidebar-page-transition"),
-                self.sidebar_transition_state,
-                duration,
-            );
-            if self.sidebar_transition_state {
-                unsafe { minux_ease_out_quint(raw) }
-            } else {
-                unsafe { minux_ease_out_quint(1.0 - raw) }
-            }
-        } else {
-            1.0
-        };
-        if self.animations_enabled && sidebar_transition < 0.999 {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        }
-        egui::SidePanel::left("workspace_sidebar")
-            .exact_width((self.sidebar_width.clamp(220.0, 420.0) * sidebar_transition).max(8.0))
-            .resizable(false)
-            .frame(egui::Frame::new()
-                .fill(PANEL.gamma_multiply(sidebar_transition.clamp(0.02, 1.0)))
-                .stroke(Stroke::new(1.0_f32, BORDER))
-                .inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
-            .show(ctx, |ui| {
-                if sidebar_transition > 0.45 {
-                    self.draw_sidebar(ui);
+                let target = if self.settings_open {
+                    settings_response.map(|response| response.rect)
+                } else if self.show_ai {
+                    Some(ai.rect)
+                } else {
+                    match self.sidebar_view {
+                        SidebarView::Explorer => Some(explorer.rect),
+                        SidebarView::Search => Some(search.rect),
+                        SidebarView::Extensions => Some(extensions.rect),
+                    }
+                };
+                if let Some(target) = target {
+                    let duration = 0.22 / self.animation_speed.clamp(0.5, 2.0);
+                    let marker_y = if self.animations_enabled {
+                        ctx.animate_value_with_time(egui::Id::new("minux-activity-active-line-y"), target.center().y, duration)
+                    } else {
+                        target.center().y
+                    };
+                    let marker = egui::Rect::from_center_size(
+                        egui::pos2(target.left() + 2.0, marker_y),
+                        egui::vec2(2.5, 24.0),
+                    );
+                    ui.painter().rect_filled(marker, egui::CornerRadius::same(1), self.accent_color());
+                    if self.animations_enabled && (marker_y - target.center().y).abs() > 0.5 {
+                        ctx.request_repaint_after(Duration::from_millis(16));
+                    }
                 }
             });
+        egui::SidePanel::left("workspace_sidebar")
+            .exact_width(self.sidebar_width.clamp(220.0, 520.0))
+            .resizable(false)
+            .frame(egui::Frame::new()
+                .fill(PANEL)
+                .stroke(Stroke::new(1.0_f32, BORDER))
+                .inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
+            .show(ctx, |ui| self.draw_sidebar(ui));
 
         let ai_panel_progress = if self.animations_enabled {
             let duration = 0.30 / self.animation_speed.clamp(0.5, 2.0);
@@ -1694,9 +1803,9 @@ impl eframe::App for MinuxIde {
         } else if self.show_ai { 1.0 } else { 0.0 };
         if self.show_ai || ai_panel_progress > 0.01 {
             egui::SidePanel::right("ai_sidebar")
-                .exact_width((320.0 * ai_panel_progress).max(1.0))
+                .exact_width((self.ai_sidebar_width.clamp(240.0, 520.0) * ai_panel_progress).max(1.0))
                 .min_width(0.0)
-                .max_width(410.0)
+                .max_width(520.0)
                 .resizable(false)
                 .frame(egui::Frame::new().fill(PANEL.gamma_multiply(ai_panel_progress.max(0.02))).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
                 .show(ctx, |ui| self.draw_ai_sidebar(ui));
@@ -1710,13 +1819,23 @@ impl eframe::App for MinuxIde {
                 } else {
                     let available = ui.available_size();
                     if self.show_output {
-                        let editor_height = (available.y - 118.0).max(180.0);
+                        let editor_height = (available.y - self.output_panel_height.clamp(120.0, 480.0)).max(160.0);
                         ui.allocate_ui_with_layout(
                             egui::vec2(available.x, editor_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| self.draw_editor_workspace(ui),
                         );
-                        ui.separator();
+                        let split = ui.allocate_response(egui::vec2(ui.available_width(), 7.0), egui::Sense::drag());
+                        if split.dragged() {
+                            self.output_panel_height = (self.output_panel_height - split.drag_delta().y).clamp(120.0, 480.0);
+                        }
+                        if split.hovered() || split.dragged() {
+                            ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                        }
+                        ui.painter().rect_filled(
+                            split.rect.shrink(egui::vec2(0.0, 2.5)), egui::CornerRadius::same(2),
+                            if split.hovered() || split.dragged() { self.accent_color() } else { BORDER },
+                        );
                         self.draw_output_panel(ui);
                     } else {
                         self.draw_editor_workspace(ui);
@@ -1759,14 +1878,6 @@ fn activity_button(
         ui.painter().rect_filled(rect, egui::CornerRadius::same(5),
             (if selected { accent_bg } else { PANEL_RAISED }).gamma_multiply(hover_t));
     }
-    if selected {
-        let marker_height = rect.height() * hover_t;
-        let marker = egui::Rect::from_min_size(
-            egui::pos2(rect.left(), rect.center().y - marker_height * 0.5),
-            egui::vec2(2.5, marker_height),
-        );
-        ui.painter().rect_filled(marker, egui::CornerRadius::same(1), accent);
-    }
     let icon_extent = (icon_size.clamp(14.0, 28.0) * (0.94 + 0.06 * hover_t)).min(rect.width() - 10.0);
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_extent, icon_extent));
     paint_icon_at(ui, icons, icon_name, icon_rect, if selected { accent } else { MUTED });
@@ -1797,7 +1908,7 @@ fn file_icon_key_for_path(path: &Path) -> &'static str {
 
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
         "rs" => "lang-rust",
-        "ts" | "tsx" => "lang-typescript",
+        "ts" | "tsx" | "mts" | "cts" => "lang-typescript",
         "js" | "jsx" | "mjs" | "cjs" => "lang-javascript",
         "py" | "pyw" => "lang-python",
         "c" | "h" => "lang-c",
@@ -1867,7 +1978,7 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
 
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
         "rs" => "Rust",
-        "ts" | "tsx" => "TypeScript",
+        "ts" | "tsx" | "mts" | "cts" => "TypeScript",
         "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
         "py" | "pyw" => "Python",
         "c" | "h" => "C",
@@ -1878,8 +1989,8 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "xsl" => "xsl",
         "xslt" => "xslt",
         "html" | "htm" => "HTML",
-        "json" | "jsonc" => "JSON",
-        "css" | "scss" | "sass" => "CSS",
+        "json" | "jsonc" | "json5" | "jsonl" => "JSON",
+        "css" | "scss" | "sass" | "less" => "CSS
         "yml" | "yaml" => "YAML",
         "toml" => "TOML",
         "md" | "markdown" => "Markdown",
@@ -1892,9 +2003,9 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "swift" => "Swift",
         "kt" | "kts" => "Kotlin",
         "pl" | "pm" => "Perl",
-        "ps1" | "psm1" => "PowerShell",
+        "ps1" | "psm1" | "psd1" => "PowerShell
         "dockerfile" => "Dockerfile",
-        "clj" | "cljs" | "cljc" | "edn" => "Clojure",
+        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure
         "coffee" => "CoffeeScript",
         "d" => "D",
         "diff" | "patch" => "Diff",
@@ -1905,7 +2016,7 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "m" => "MATLAB",
         "mm" => "Objective-C",
         "ml" | "mli" => "OCaml",
-        "r" => "R",
+        "r" | "rmd" => "R
         "scala" | "sc" => "Scala",
         "jl" => "Julia",
         "zig" => "Zig",
@@ -1949,8 +2060,8 @@ fn language_display_name(path: &Path) -> &'static str {
         "xsl" | "xslt" => "XSLT",
         "xsd" => "XML Schema",
         "html" | "htm" => "HTML",
-        "json" | "jsonc" => "JSON",
-        "css" | "scss" | "sass" => "CSS",
+        "json" | "jsonc" | "json5" | "jsonl" => "JSON",
+        "css" | "scss" | "sass" | "less" => "CSS
         "yml" | "yaml" => "YAML",
         "toml" => "TOML",
         "md" | "markdown" => "Markdown",
@@ -1967,8 +2078,8 @@ fn language_display_name(path: &Path) -> &'static str {
         "swift" => "Swift",
         "kt" | "kts" => "Kotlin",
         "pl" | "pm" => "Perl",
-        "ps1" | "psm1" => "PowerShell",
-        "clj" | "cljs" | "cljc" | "edn" => "Clojure",
+        "ps1" | "psm1" | "psd1" => "PowerShell
+        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure
         "coffee" => "CoffeeScript",
         "d" => "D",
         "diff" | "patch" => "Diff",
@@ -1985,7 +2096,7 @@ fn language_display_name(path: &Path) -> &'static str {
         "tf" | "hcl" => "Terraform",
         "nix" => "Nix",
         "f" | "for" | "f90" | "f95" | "f03" | "f08" => "Fortran",
-        "r" => "R",
+        "r" | "rmd" => "R
         "scala" | "sc" => "Scala",
         "tcl" => "Tcl",
         "tex" | "ltx" => "LaTeX",
@@ -2073,6 +2184,10 @@ mod language_support_tests {
             ("script.tcl", "Tcl"),
             ("paper.tex", "LaTeX"),
             ("change.patch", "Diff"),
+            ("module.mts", "TypeScript"),
+            ("config.json5", "JSON"),
+            ("script.psd1", "PowerShell"),
+            ("theme.scss", "CSS"),
         ];
 
         for (file, expected) in cases {
