@@ -1916,8 +1916,14 @@ impl eframe::App for MinuxIde {
                     match result {
                         Ok(models) => {
                             let count = models.len();
+                            let current_is_builtin = ai::suggested_models().contains(&self.model.as_str());
+                            if current_is_builtin && !models.iter().any(|model| model == &self.model) {
+                                if let Some(first_supported) = models.first() {
+                                    self.model = first_supported.clone();
+                                }
+                            }
                             self.available_models = models;
-                            self.status = format!("AI API: загружено моделей — {count}");
+                            self.status = format!("SambaNova Cloud: доступно моделей — {count}");
                         }
                         Err(error) => self.status = error,
                     }
