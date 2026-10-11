@@ -56,9 +56,12 @@ object WorkspaceDoctor {
     )
     private val languageByExtension = mapOf(
         "kt" to "Kotlin", "kts" to "Kotlin", "rs" to "Rust", "c" to "C",
-        "h" to "C/C++ Header", "cc" to "C++", "cpp" to "C++", "cxx" to "C++",
-        "hpp" to "C++ Header", "cs" to "C#", "ts" to "TypeScript", "tsx" to "TypeScript",
-        "js" to "JavaScript", "jsx" to "JavaScript", "mjs" to "JavaScript",
+        "h" to "C/C++ Header", "cc" to "C++", "cpp" to "C++", "cxx" to "C++", "c++" to "C++",
+        "hpp" to "C++ Header", "hh" to "C++ Header", "hxx" to "C++ Header",
+        "cs" to "C#", "fs" to "F#", "fsx" to "F#", "fsi" to "F#", "ts" to "TypeScript",
+        "tsx" to "TypeScript", "mts" to "TypeScript", "cts" to "TypeScript",
+        "js" to "JavaScript", "jsx" to "JavaScript", "mjs" to "JavaScript", "cjs" to "JavaScript",
+        "coffee" to "CoffeeScript", "groovy" to "Groovy", "gradle" to "Gradle",
         "py" to "Python", "pyw" to "Python", "sh" to "Shell", "bash" to "Shell",
         "java" to "Java", "go" to "Go", "php" to "PHP", "rb" to "Ruby", "swift" to "Swift",
         "lua" to "Lua", "sql" to "SQL", "dart" to "Dart", "pl" to "Perl", "pm" to "Perl",
@@ -69,24 +72,42 @@ object WorkspaceDoctor {
         "f90" to "Fortran", "f95" to "Fortran", "f03" to "Fortran", "f08" to "Fortran",
         "ml" to "OCaml", "mli" to "OCaml", "mm" to "Objective-C", "m" to "MATLAB",
         "vue" to "Vue", "svelte" to "Svelte", "html" to "HTML", "css" to "CSS",
-        "scss" to "SCSS", "xml" to "XML", "xsl" to "XSLT", "md" to "Markdown",
-        "json" to "JSON", "yaml" to "YAML", "yml" to "YAML", "toml" to "TOML",
-        "gradle" to "Gradle",
+        "scss" to "SCSS", "sass" to "Sass", "less" to "Less", "xml" to "XML", "xsl" to "XSLT",
+        "md" to "Markdown", "mdx" to "MDX", "json" to "JSON", "jsonc" to "JSONC",
+        "json5" to "JSON5", "jsonl" to "JSONL", "yaml" to "YAML", "yml" to "YAML",
+        "toml" to "TOML", "ini" to "INI", "cfg" to "Config", "conf" to "Config",
+        "ps1" to "PowerShell", "psm1" to "PowerShell", "psd1" to "PowerShell",
+        "graphql" to "GraphQL", "gql" to "GraphQL", "tcl" to "Tcl",
+        "tex" to "LaTeX", "ltx" to "LaTeX", "diff" to "Diff", "patch" to "Diff",
+        "rmd" to "R Markdown", "rake" to "Ruby",
+    )
+    private val languageByFilename = mapOf(
+        "dockerfile" to "Docker", "containerfile" to "Docker",
+        "makefile" to "Make", "gnumakefile" to "Make", "justfile" to "Just",
+        "cmakelists.txt" to "CMake", "jenkinsfile" to "Groovy",
+    )
+    private val textFileNames = setOf(
+        "dockerfile", "containerfile", "makefile", "gnumakefile", "justfile",
+        "cmakelists.txt", "jenkinsfile", ".gitignore", ".dockerignore",
     )
     private val manifestNames = setOf(
         "cargo.toml", "cargo.lock", "package.json", "package-lock.json", "tsconfig.json",
         "pyproject.toml", "requirements.txt", "requirements-dev.txt", "makefile", "gnumakefile",
         "cmakelists.txt", "go.mod", "pom.xml", "build.gradle", "build.gradle.kts",
         "settings.gradle", "settings.gradle.kts", "composer.json", "gemfile", "dockerfile",
-        "justfile", "gradlew", "gradlew.bat",
+        "containerfile", "justfile", "jenkinsfile", "gradlew", "gradlew.bat",
+        "deno.json", "deno.jsonc", "bun.lockb", "mix.exs", "go.work", "cargo.config.toml",
     )
     private val textExtensions = setOf(
-        "kt", "kts", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "cs", "ts", "tsx", "js",
-        "jsx", "mjs", "py", "pyw", "sh", "bash", "java", "go", "php", "rb", "swift",
-        "lua", "sql", "dart", "pl", "pm", "scala", "hs", "clj", "cljs", "erl", "ex",
-        "exs", "vue", "svelte", "html", "css", "scss", "xml", "xsl", "md",
-        "jl", "zig", "sol", "tf", "hcl", "nix", "f", "for", "f90", "f95", "f03", "f08",
-        "ml", "mli", "mm", "m",
+        "kt", "kts", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "cs",
+        "fs", "fsx", "fsi", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "coffee",
+        "py", "pyw", "sh", "bash", "java", "go", "php", "rb", "rake", "swift", "groovy",
+        "lua", "sql", "dart", "pl", "pm", "scala", "hs", "clj", "cljs", "cljc", "cljx",
+        "erl", "hrl", "ex", "exs", "vue", "svelte", "html", "css", "scss", "sass", "less",
+        "xml", "xsl", "xsd", "md", "mdx", "jl", "zig", "sol", "tf", "hcl", "nix",
+        "f", "for", "f90", "f95", "f03", "f08", "ml", "mli", "mm", "m", "ps1", "psm1",
+        "psd1", "graphql", "gql", "tcl", "tex", "ltx", "diff", "patch", "json5", "jsonl",
+        "rmd", "ini", "cfg", "conf", "c++",
     )
     private val todoPattern = Regex("""(?i)^\s*(//|#|/\*|\*|<!--).*\b(TODO|FIXME|HACK|XXX)\b""")
     private val whitespacePattern = Regex("\\s+")
@@ -135,13 +156,14 @@ object WorkspaceDoctor {
                     val relative = root.relativize(file).toString().replace('\\', '/')
                     val normalizedName = file.fileName.toString().lowercase(Locale.ROOT)
                     val extension = normalizedName.substringAfterLast('.', "")
-                    languageByExtension[extension]?.let { language ->
+                    (languageByFilename[normalizedName] ?: languageByExtension[extension])?.let { language ->
                         languages[language] = (languages[language] ?: 0) + 1
                     }
                     if (normalizedName in manifestNames || normalizedName.endsWith(".csproj") ||
                         normalizedName.endsWith(".sln")) manifests += relative
 
-                    if (extension in textExtensions && !isSecretPath(relative) && !todoLimitReached) {
+                    if ((extension in textExtensions || normalizedName in textFileNames) &&
+                        !isSecretPath(relative) && !todoLimitReached) {
                         val size = try { Files.size(file) } catch (_: IOException) { Long.MAX_VALUE }
                         if (size <= MAX_TEXT_FILE_BYTES) {
                             try {
