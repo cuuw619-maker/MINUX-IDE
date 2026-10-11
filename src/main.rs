@@ -2371,32 +2371,53 @@ fn activity_button(
     let (rect, response) = ui.allocate_exact_size(egui::vec2(button_width, button_height), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
-    let hover_target = response.hovered() || selected;
-    let hover_t = if animations_enabled {
-        let duration = 0.22 / animation_speed.clamp(0.5, 2.0);
-        let raw = ui.ctx().animate_bool_with_time(response.id.with("hover"), hover_target, duration);
-        unsafe { minux_ease_out_quint(raw) }
-    } else if hover_target { 1.0 } else { 0.0 };
-    // Capsule-shaped hit target and active surface; icon geometry stays constant.
-    if hover_t > 0.01 {
+    let duration = 0.30 / animation_speed.clamp(0.5, 2.0);
+
+    // One shared capsule travels between selected activity buttons. Animate its center
+    // rather than independently fading a background on each button.
+    if selected {
+        let center = if animations_enabled {
+            egui::pos2(
+                ui.ctx().animate_value_with_time(egui::Id::new("minux-activity-pill-x"), rect.center().x, duration),
+                ui.ctx().animate_value_with_time(egui::Id::new("minux-activity-pill-y"), rect.center().y, duration),
+            )
+        } else {
+            rect.center()
+        };
         let pill = egui::Rect::from_center_size(
-            rect.center(),
+            center,
             egui::vec2(rect.width() - 2.0, rect.height() - 3.0),
         );
         ui.painter().rect_filled(
             pill,
             egui::CornerRadius::same((pill.height() * 0.5) as u8),
-            (if selected { accent_bg } else { PANEL_RAISED }).gamma_multiply(hover_t),
+            accent_bg,
         );
-        if selected {
-            ui.painter().rect_stroke(
-                pill,
-                egui::CornerRadius::same((pill.height() * 0.5) as u8),
-                Stroke::new(1.0, accent.gamma_multiply(0.30 * hover_t)),
-                egui::StrokeKind::Inside,
-            );
-        }
+        ui.painter().rect_stroke(
+            pill,
+            egui::CornerRadius::same((pill.height() * 0.5) as u8),
+            Stroke::new(1.0, accent.gamma_multiply(0.30)),
+            egui::StrokeKind::Inside,
+        );
     }
+
+    let hover_target = response.hovered() || selected;
+    let hover_t = if animations_enabled {
+        let raw = ui.ctx().animate_bool_with_time(response.id.with("hover"), hover_target, 0.18 / animation_speed.clamp(0.5, 2.0));
+        unsafe { minux_ease_out_quint(raw) }
+    } else if hover_target { 1.0 } else { 0.0 };
+    if response.hovered() && !selected && hover_t > 0.01 {
+        let hover_pill = egui::Rect::from_center_size(
+            rect.center(),
+            egui::vec2(rect.width() - 2.0, rect.height() - 3.0),
+        );
+        ui.painter().rect_filled(
+            hover_pill,
+            egui::CornerRadius::same((hover_pill.height() * 0.5) as u8),
+            PANEL_RAISED.gamma_multiply(hover_t),
+        );
+    }
+
     let icon_extent = icon_size.clamp(14.0, 28.0).min(rect.width() - 10.0);
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_extent, icon_extent));
     paint_icon_at(ui, icons, icon_name, icon_rect, if selected { accent } else { MUTED });
