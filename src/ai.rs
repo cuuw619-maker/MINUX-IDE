@@ -88,7 +88,7 @@ fn legacy_hf_models() -> &'static [&'static str] {
     ]
 }
 
-pub fn normalize_duckduckgo_model_id(input: &str) -> Result<String, String> {
+pub fn normalize_api_model_id(input: &str) -> Result<String, String> {
     let value = input.trim().trim_matches(|c| c == '\'' || c == '"' || c == '`').trim();
     let valid_chars = value.bytes().all(|byte| {
         byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':' | b'@')
@@ -145,7 +145,7 @@ pub fn load_settings() -> AiSettings {
     settings.model = if migrating_from_duckduckgo || known_legacy_model {
         DEFAULT_MODEL.to_owned()
     } else {
-        normalize_duckduckgo_model_id(&stored_model)
+        normalize_api_model_id(&stored_model)
             .unwrap_or_else(|_| DEFAULT_MODEL.to_owned())
     };
     settings.corner_radius = settings.corner_radius.clamp(3, 14);
@@ -319,7 +319,7 @@ pub fn fetch_models(api_base_url: &str, token: &str) -> Result<Vec<String>, Stri
     let mut models: Vec<String> = items.iter()
         .filter_map(|item| item.get("id").or_else(|| item.get("name")).or_else(|| item.get("model"))
             .and_then(Value::as_str).map(str::to_owned))
-        .filter(|id| normalize_duckduckgo_model_id(id).is_ok())
+        .filter(|id| normalize_api_model_id(id).is_ok())
         .collect();
     models.sort_unstable();
     models.dedup();
@@ -402,7 +402,7 @@ fn format_api_error(status: u16, body: &str) -> String {
         410 => format!("API вернул HTTP 410 Gone: endpoint удалён или отключён. Укажи актуальный Base URL в настройках; сетевые перенаправления и повторы этот ответ не исправят. {detail}"),
         429 => format!("Лимит запросов превышен (429). Подожди и повтори запрос. {detail}"),
         402 => format!("Сервис сообщил об ограничении квоты (402). {detail}"),
-        _ => format!("Ошибка настроенного Chat API (HTTP {status}). {detail}"),
+        _ => format!("Ошибка SambaNova Cloud API (HTTP {status}). {detail}"),
     }
 }
 
@@ -416,7 +416,7 @@ pub fn run_agent(
     }
     let mut settings = settings;
     settings.api_base_url = normalize_api_base_url(&settings.api_base_url)?;
-    settings.model = normalize_duckduckgo_model_id(&settings.model)?;
+    settings.model = normalize_api_model_id(&settings.model)?;
 
     let root = workspace_root.canonicalize()
         .map_err(|e| format!("Не удалось открыть рабочую папку: {e}"))?;
@@ -1182,7 +1182,7 @@ mod model_id_tests {
     use std::path::Path;
     use super::{
         endpoint_url, html_endpoint_error, looks_like_duckduckgo_page, looks_like_html_response,
-        normalize_api_base_url, normalize_duckduckgo_model_id, normalize_hex_color,
+        normalize_api_base_url, normalize_api_model_id, normalize_hex_color,
         normalize_model_id, project_language, redirect_error, replace_exactly_once,
     };
 
@@ -1206,10 +1206,10 @@ mod model_id_tests {
 
     #[test]
     fn accepts_duckduckgo_compatible_model_ids() {
-        assert_eq!(normalize_duckduckgo_model_id("gpt-4o-mini").unwrap(), "gpt-4o-mini");
-        assert_eq!(normalize_duckduckgo_model_id("org/model:v2").unwrap(), "org/model:v2");
-        assert!(normalize_duckduckgo_model_id("model id with spaces").is_err());
-        assert!(normalize_duckduckgo_model_id("/model").is_err());
+        assert_eq!(normalize_api_model_id("gpt-4o-mini").unwrap(), "gpt-4o-mini");
+        assert_eq!(normalize_api_model_id("org/model:v2").unwrap(), "org/model:v2");
+        assert!(normalize_api_model_id("model id with spaces").is_err());
+        assert!(normalize_api_model_id("/model").is_err());
     }
 
     #[test]
