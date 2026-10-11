@@ -831,6 +831,13 @@ impl MinuxIde {
     }
 
     fn save_ai_settings(&mut self) {
+        match ai::normalize_api_base_url(&self.api_base_url) {
+            Ok(base_url) => self.api_base_url = base_url,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        }
         match ai::save_settings(&self.current_ai_settings()) {
             Ok(()) => self.status = "Настройки AI API сохранены локально".into(),
             Err(error) => self.status = error,
