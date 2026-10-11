@@ -137,6 +137,8 @@ pub fn load_settings() -> AiSettings {
     let stored_base = settings.api_base_url.trim().trim_end_matches('/');
     let migrating_from_duckduckgo = stored_base == LEGACY_DUCKDUCKGO_BASE_URL;
     settings.api_base_url = if migrating_from_duckduckgo {
+        // A DuckDuckGo session token is not a SambaNova API key.
+        settings.token.clear();
         DEFAULT_API_BASE_URL.to_owned()
     } else {
         normalize_api_base_url(&settings.api_base_url)
@@ -1182,7 +1184,8 @@ mod model_id_tests {
     use std::path::Path;
     use super::{
         endpoint_url, html_endpoint_error, looks_like_duckduckgo_page, looks_like_html_response,
-        normalize_api_base_url, normalize_api_model_id, normalize_hex_color,
+        normalize_api_base_url, normalize_api_model_id, normalize_hex_color, AiSettings,
+        suggested_models,
         normalize_model_id, project_language, redirect_error, replace_exactly_once,
     };
 
@@ -1205,11 +1208,19 @@ mod model_id_tests {
     }
 
     #[test]
-    fn accepts_duckduckgo_compatible_model_ids() {
-        assert_eq!(normalize_api_model_id("gpt-4o-mini").unwrap(), "gpt-4o-mini");
+    fn accepts_sambanova_model_ids() {
+        assert_eq!(normalize_api_model_id("Meta-Llama-3.3-70B-Instruct").unwrap(), "Meta-Llama-3.3-70B-Instruct");
         assert_eq!(normalize_api_model_id("org/model:v2").unwrap(), "org/model:v2");
         assert!(normalize_api_model_id("model id with spaces").is_err());
         assert!(normalize_api_model_id("/model").is_err());
+    }
+
+    #[test]
+    fn defaults_to_sambanova_cloud_api() {
+        let settings = AiSettings::default();
+        assert_eq!(settings.api_base_url, "https://api.sambanova.ai/v1");
+        assert_eq!(settings.model, "Meta-Llama-3.3-70B-Instruct");
+        assert!(suggested_models().contains(&settings.model.as_str()));
     }
 
     #[test]
