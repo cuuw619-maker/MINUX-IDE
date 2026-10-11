@@ -369,7 +369,7 @@ fn format_api_error(status: u16, body: &str) -> String {
             .and_then(|value| value.pointer("/error/message").or_else(|| value.get("message")))
             .and_then(Value::as_str)
             .unwrap_or("Модель не существует или недоступна этому endpoint.");
-        return format!("DuckDuckGo Chat API не распознал модель. Проверь ID или выбери вариант из каталога. {message}");
+        return format!("Настроенный Chat API не распознал модель. Проверь ID модели или выбери вариант из каталога. {message}");
     }
 
     let detail = parsed
@@ -387,14 +387,14 @@ fn format_api_error(status: u16, body: &str) -> String {
         detail
     };
     match status {
-        301 | 302 | 303 | 307 | 308 => format!("DuckDuckGo Chat API перенаправил запрос (HTTP {status}) вместо ответа JSON. Проверь адрес endpoint и доступ к сервису."),
-        401 => format!("DuckDuckGo Chat API требует корректный токен (401). Токен в настройках необязателен, если endpoint разрешает анонимные запросы. {detail}"),
-        403 => format!("DuckDuckGo Chat API запретил доступ (403). Проверь доступ к сервису. {detail}"),
+        301 | 302 | 303 | 307 | 308 => redirect_error(status, None),
+        401 => format!("API-токен отсутствует или не принят сервером (HTTP 401). Проверь токен для выбранного провайдера. {detail}"),
+        403 => format!("Выбранный API запретил доступ (HTTP 403). Проверь ключ, права доступа и ограничения провайдера. {detail}"),
         404 => format!("Endpoint или модель не найдены (404). Проверь ID модели и URL сервиса. {detail}"),
         410 => format!("API вернул HTTP 410 Gone: endpoint удалён или отключён. Укажи актуальный Base URL в настройках; сетевые перенаправления и повторы этот ответ не исправят. {detail}"),
         429 => format!("Лимит запросов превышен (429). Подожди и повтори запрос. {detail}"),
         402 => format!("Сервис сообщил об ограничении квоты (402). {detail}"),
-        _ => format!("Ошибка DuckDuckGo Chat API (HTTP {status}). {detail}"),
+        _ => format!("Ошибка настроенного Chat API (HTTP {status}). {detail}"),
     }
 }
 
@@ -540,7 +540,7 @@ fn request_assistant(
             request = request.bearer_auth(settings.token.trim());
         }
         let response = request.send()
-            .map_err(|e| format!("Запрос к DuckDuckGo Chat API не выполнен: {e}"))?;
+            .map_err(|e| format!("Запрос к настроенному Chat API не выполнен: {e}"))?;
 
         let status = response.status();
         if status.is_redirection() {
@@ -555,7 +555,7 @@ fn request_assistant(
         }
         if status.is_success() {
             let value: Value = serde_json::from_str(&body)
-                .map_err(|_| "Ответ DuckDuckGo Chat API не является корректным JSON. Проверь URL endpoint и доступ к сервису.".to_string())?;
+                .map_err(|_| "Ответ настроенного Chat API не является корректным JSON. Проверь Base URL и доступность /chat/completions.".to_string())?;
             return parse_assistant_message(&value);
         }
 
@@ -1254,7 +1254,7 @@ mod model_id_tests {
         assert!(looks_like_html_response(html, "text/html; charset=utf-8"));
         assert!(looks_like_duckduckgo_page(html));
         assert!(!looks_like_html_response(r#"{"choices":[{"message":{"content":"hello"}}]}"#, "application/json"));
-        assert!(html_endpoint_error(200).contains("HTML-страницу"));
+        assert!(html_endpoint_error(200).contains("HTML вместо JSON"));
     }
 
     #[test]
