@@ -193,10 +193,10 @@ impl Default for MinuxIde {
 
 fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius: u8) {
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
-    style.spacing.button_padding = egui::vec2(12.0, 7.0);
-    style.spacing.interact_size.y = 30.0;
-    style.animation_time = 0.18;
+    style.spacing.item_spacing = egui::vec2(9.0, 8.0);
+    style.spacing.button_padding = egui::vec2(14.0, 9.0);
+    style.spacing.interact_size.y = 32.0;
+    style.animation_time = 0.22;
 
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = BG;
@@ -266,6 +266,125 @@ fn normalize_icon_svg(svg: &str) -> String {
     let svg = svg.replace("currentColor", "#FFFFFF")
         .replace("stroke-width=\"2\"", "stroke-width=\"1.7\"");
     normalize_svg_color_attribute(&normalize_svg_color_attribute(&svg, "stroke"), "fill")
+}
+
+fn parse_hex_color_token(value: &[u8]) -> Option<(Color32, Color32)> {
+    let digit = |byte: u8| -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    };
+    let component = |high: u8, low: u8| -> Option<u8> {
+        Some(digit(high)? * 16 + digit(low)?)
+    };
+    let (r, g, b) = match value.len() {
+        3 | 4 => (digit(value[0])? * 17, digit(value[1])? * 17, digit(value[2])? * 17),
+        6 | 8 => (
+            component(value[0], value[1])?,
+            component(value[2], value[3])?,
+            component(value[4], value[5])?,
+        ),
+        _ => return None,
+    };
+    let actual = Color32::from_rgb(r, g, b);
+    let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+    let readable = if luminance < 0.13 {
+        actual.lerp(Color32::WHITE, 0.48)
+    } else {
+        actual
+    };
+    Some((actual, readable))
+}
+
+fn hex_color_spans(text: &str) -> Vec<(std::ops::Range<usize>, Color32, Color32)> {
+    let bytes = text.as_bytes();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'#' {
+            i += 1;
+            continue;
+        }
+        let is_identifier = |byte: u8| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-');
+        if i > 0 && is_identifier(bytes[i - 1]) {
+            i += 1;
+            continue;
+        }
+        let mut end = i + 1;
+        while end < bytes.len() && bytes[end].is_ascii_hexdigit() && end - i <= 8 {
+            end += 1;
+        }
+        let digits = end.saturating_sub(i + 1);
+        let right_boundary = end == bytes.len() || !is_identifier(bytes[end]);
+        if matches!(digits, 3 | 4 | 6 | 8) && right_boundary {
+            if let Some((actual, readable)) = parse_hex_color_token(&bytes[i + 1..end]) {
+                spans.push((i..end, actual, readable));
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    spans
+}
+
+fn highlight_hex_colors(mut job: egui::text::LayoutJob) -> egui::text::LayoutJob {
+    let spans = hex_color_spans(&job.text);
+    if spans.is_empty() || job.sections.is_empty() {
+        return job;
+    }
+
+    let original = std::mem::take(&mut job.sections);
+    let mut result = Vec::with_capacity(original.len() + spans.len() * 2);
+    for section in original {
+        let range_start = section.byte_range.start;
+        let range_end = section.byte_range.end;
+        if range_start >= range_end {
+            continue;
+        }
+
+        let first = spans.partition_point(|(range, _, _)| range.end <= range_start);
+        let relevant: Vec<_> = spans.iter().skip(first)
+            .take_while(|(range, _, _)| range.start < range_end)
+            .collect();
+        let mut boundaries = vec![range_start, range_end];
+        for (range, _, _) in &relevant {
+            if range.start > range_start && range.start < range_end {
+                boundaries.push(range.start);
+            }
+            if range.end > range_start && range.end < range_end {
+                boundaries.push(range.end);
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        for pair in boundaries.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            if start >= end {
+                continue;
+            }
+            let mut section_part = section.clone();
+            section_part.byte_range = start..end;
+            if start != range_start {
+                section_part.leading_space = 0.0;
+            }
+            if let Some((_, actual, readable)) = relevant.iter()
+                .find(|(range, _, _)| range.start <= start && end <= range.end)
+            {
+                section_part.format.color = *readable;
+                section_part.format.background = actual.gamma_multiply(0.18);
+                section_part.format.underline = Stroke::new(1.0, *actual);
+            }
+            result.push(section_part);
+        }
+    }
+    job.sections = result;
+    job
 }
 
 fn icon_fallback_text(name: &str) -> &'static str {
@@ -569,18 +688,36 @@ impl MinuxIde {
         let available_width = ui.available_width();
         let available_height = ui.available_height();
         let area = ui.max_rect();
+        let time = ui.input(|input| input.time) as f32;
+        let pulse = if self.animations_enabled { 0.5 + 0.5 * (time * 0.82).sin() } else { 0.5 };
+        if self.animations_enabled {
+            ui.ctx().request_repaint_after(Duration::from_millis(32));
+        }
         ui.painter().circle_filled(
             egui::pos2(area.right() - 90.0, area.top() + 90.0),
-            210.0,
-            accent.gamma_multiply(0.07),
+            190.0 + pulse * 34.0,
+            accent.gamma_multiply(0.045 + pulse * 0.035),
         );
         ui.painter().circle_filled(
             egui::pos2(area.left() + 60.0, area.bottom() - 50.0),
-            150.0,
-            accent.gamma_multiply(0.035),
+            135.0 + (1.0 - pulse) * 24.0,
+            accent.gamma_multiply(0.025 + pulse * 0.02),
+        );
+        ui.painter().circle_stroke(
+            egui::pos2(area.right() - 92.0, area.top() + 92.0),
+            150.0 + pulse * 20.0,
+            Stroke::new(1.0, accent.gamma_multiply(0.055)),
         );
 
-        ui.add_space((available_height * 0.045).clamp(16.0, 38.0));
+        let intro_raw = if self.animations_enabled {
+            ui.ctx().animate_bool_with_time(
+                egui::Id::new("minux-home-intro"),
+                true,
+                0.38 / self.animation_speed.clamp(0.5, 2.0),
+            )
+        } else { 1.0 };
+        let intro = unsafe { minux_ease_out_cubic(intro_raw) };
+        ui.add_space((available_height * 0.045).clamp(16.0, 38.0) + (1.0 - intro) * 14.0);
         ui.horizontal(|ui| {
             draw_icon(ui, &self.icons, "folder-open", 18.0, accent);
             ui.label(RichText::new("MINUX  /  WORKSPACE").size(11.0).strong().color(MUTED));
@@ -594,8 +731,8 @@ impl MinuxIde {
 
         egui::Frame::new()
             .fill(PANEL)
-            .stroke(Stroke::new(1.0_f32, BORDER))
-            .inner_margin(egui::Margin::same(24))
+            .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.12 + pulse * 0.08)))
+            .inner_margin(egui::Margin::same(26))
             .show(ui, |ui| {
                 ui.set_min_width((available_width - 4.0).max(300.0));
                 ui.horizontal_top(|ui| {
@@ -607,15 +744,15 @@ impl MinuxIde {
                         ui.label(RichText::new("Открой проект и продолжай работу с привычными языками, инструментами и AI-агентом.").size(13.0).color(MUTED));
                         ui.add_space(18.0);
                         ui.horizontal(|ui| {
-                            if ui.add_sized(
-                                [210.0, 44.0],
-                                egui::Button::new(RichText::new("＋   Открыть проект").size(13.0).strong()),
+                            if home_action_button(
+                                ui, &self.icons, "Открыть проект", "folder-open", 210.0,
+                                true, accent, self.animations_enabled, self.animation_speed,
                             ).clicked() {
                                 self.open_workspace();
                             }
-                            if ui.add_sized(
-                                [142.0, 44.0],
-                                egui::Button::new(RichText::new("Настройки").size(12.0)),
+                            if home_action_button(
+                                ui, &self.icons, "Настройки", "settings-2", 142.0,
+                                false, accent, self.animations_enabled, self.animation_speed,
                             ).clicked() {
                                 self.settings_open = true;
                             }
@@ -624,7 +761,24 @@ impl MinuxIde {
                     ui.add_space(22.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.vertical_centered(|ui| {
-                            draw_icon(ui, &self.icons, "brain", 76.0, accent);
+                            let (logo_slot, _) = ui.allocate_exact_size(egui::vec2(88.0, 88.0), egui::Sense::hover());
+                            let float_y = if self.animations_enabled { (time * 1.35).sin() * 3.0 } else { 0.0 };
+                            let logo_center = logo_slot.center() + egui::vec2(0.0, float_y);
+                            ui.painter().circle_filled(
+                                logo_center,
+                                38.0 + pulse * 4.0,
+                                accent.gamma_multiply(0.06 + pulse * 0.04),
+                            );
+                            ui.painter().circle_stroke(
+                                logo_center,
+                                42.0 + pulse * 4.0,
+                                Stroke::new(1.0, accent.gamma_multiply(0.18)),
+                            );
+                            paint_icon_at(
+                                ui, &self.icons, "brain",
+                                egui::Rect::from_center_size(logo_center, egui::vec2(64.0, 64.0)),
+                                accent,
+                            );
                             ui.add_space(8.0);
                             ui.label(RichText::new("MINUX IDE").size(19.0).strong().color(TEXT));
                             ui.label(RichText::new("NATIVE · POLYGLOT · AI").size(9.0).color(MUTED));
@@ -667,9 +821,9 @@ impl MinuxIde {
                         let label = Path::new(path).file_name()
                             .map(|name| name.to_string_lossy().into_owned())
                             .unwrap_or_else(|| path.clone());
-                        let response = ui.add_sized(
-                            [ui.available_width().min(940.0), 44.0],
-                            egui::Button::new(RichText::new(format!("▸   {label}     ·     {path}")).size(11.5)).frame(true),
+                        let response = home_workspace_row(
+                            ui, &self.icons, &label, path, accent,
+                            self.animations_enabled, self.animation_speed,
                         );
                         if response.clicked() {
                             self.open_recent_workspace(path);
@@ -1501,7 +1655,7 @@ impl MinuxIde {
         if let Some(path) = self.selected_file.clone() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).size(10.0).color(MUTED));
-                ui.label(RichText::new("›").color(MUTED));
+                draw_icon(ui, &self.icons, "folder-open", 12.0, MUTED);
                 ui.label(RichText::new(path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy()).size(10.0).color(ACCENT));
             });
             ui.add_space(5.0);
@@ -1527,6 +1681,7 @@ impl MinuxIde {
                     )
                 };
                 job.wrap.max_width = wrap_width;
+                let job = highlight_hex_colors(job);
                 ui.fonts(|fonts| fonts.layout_job(job))
             };
 
@@ -1980,7 +2135,7 @@ fn show_vertical_resize_grip(
 
     // Center a wide, foreground hit target over the actual panel border.
     // This keeps resizing usable even when a scroll area or a child widget reaches the edge.
-    let width = 16.0;
+    let width = 28.0;
     let left = if on_right_edge {
         panel_rect.right() - width * 0.5
     } else {
@@ -1997,7 +2152,7 @@ fn show_vertical_resize_grip(
         .interactable(true)
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
             result.delta_x = response.drag_delta().x;
             result.drag_stopped = response.drag_stopped();
 
@@ -2005,12 +2160,12 @@ fn show_vertical_resize_grip(
             if active {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                 ui.painter().rect_filled(
-                    rect,
+                    rect.shrink2(egui::vec2(8.0, 0.0)),
                     egui::CornerRadius::same(4),
-                    accent.gamma_multiply(0.14),
+                    accent.gamma_multiply(0.18),
                 );
-                response.on_hover_text("Перетащи границу, чтобы изменить ширину меню");
             }
+            response.on_hover_text("Перетащи границу, чтобы изменить ширину меню");
 
             let pill_height = rect.height().clamp(36.0, 64.0);
             let pill = egui::Rect::from_center_size(
