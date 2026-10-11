@@ -1858,7 +1858,12 @@ impl MinuxIde {
                 self.status = "Есть несохранённые изменения".into();
             }
         } else {
-            self.draw_welcome(ui);
+            // The welcome dashboard contains several cards and language chips. Keep it
+            // scrollable on short windows instead of letting the lower content disappear.
+            egui::ScrollArea::vertical()
+                .id_salt("minux-welcome-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.draw_welcome(ui));
         }
     }
 
@@ -2384,18 +2389,20 @@ fn activity_button(
         } else {
             rect.center()
         };
-        let pill = egui::Rect::from_center_size(
-            center,
-            egui::vec2(rect.width() - 2.0, rect.height() - 3.0),
+        // Stretch the capsule slightly while it travels, then let it settle back
+        // into a compact pill. This gives egui a lightweight liquid/matched-geometry feel.
+        let travel = center.distance(rect.center());
+        let stretch = if animations_enabled { (travel * 0.14).clamp(0.0, 13.0) } else { 0.0 };
+        let pill_size = egui::vec2(
+            (rect.width() - 2.0 + stretch).min(48.0),
+            (rect.height() - 3.0 - stretch * 0.20).max(31.0),
         );
-        ui.painter().rect_filled(
-            pill,
-            egui::CornerRadius::same((pill.height() * 0.5) as u8),
-            accent_bg,
-        );
+        let pill = egui::Rect::from_center_size(center, pill_size);
+        let pill_radius = egui::CornerRadius::same((pill.height() * 0.5) as u8);
+        ui.painter().rect_filled(pill, pill_radius, accent_bg);
         ui.painter().rect_stroke(
             pill,
-            egui::CornerRadius::same((pill.height() * 0.5) as u8),
+            pill_radius,
             Stroke::new(1.0, accent.gamma_multiply(0.30)),
             egui::StrokeKind::Inside,
         );
