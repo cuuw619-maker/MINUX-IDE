@@ -2004,6 +2004,7 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
 
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
         "rs" => "Rust",
+        "s" | "asm" => "asm",
         "ts" | "tsx" | "mts" | "cts" => "TypeScript",
         "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
         "py" | "pyw" => "Python",
@@ -2072,6 +2073,7 @@ fn language_display_name(path: &Path) -> &'static str {
     }
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
         "rs" => "Rust",
+        "s" | "asm" => "Assembly",
         "ts" | "mts" | "cts" => "TypeScript",
         "tsx" => "TSX",
         "js" | "mjs" | "cjs" => "JavaScript",
@@ -2181,6 +2183,13 @@ mod language_support_tests {
     fn maps_common_languages_to_distinct_icons() {
         for (file, expected) in [
             ("main.go", "lang-go"),
+            ("source.s", "lang-assembly"),
+            ("source.asm", "lang-assembly"),
+            ("script.coffee", "lang-coffeescript"),
+            ("script.tcl", "lang-tcl"),
+            ("paper.tex", "lang-latex"),
+            ("change.diff", "lang-diff"),
+            ("settings.toml", "lang-toml"),
             ("Main.java", "lang-java"),
             ("index.php", "lang-php"),
             ("server.rb", "lang-ruby"),
@@ -2226,12 +2235,19 @@ mod language_support_tests {
             ("config.json5", "JSON"),
             ("script.psd1", "PowerShell"),
             ("theme.scss", "CSS"),
+            ("engine.s", "Assembly"),
+            ("script.coffee", "CoffeeScript"),
+            ("script.tcl", "Tcl"),
+            ("paper.tex", "LaTeX"),
+            ("change.diff", "Diff"),
+            ("settings.toml", "TOML"),
         ];
 
         for (file, expected) in cases {
             let path = Path::new(file);
             assert_eq!(language_display_name(path), expected, "display name for {file}");
-            assert_eq!(syntax_selector_for_path(path), expected, "syntax selector for {file}");
+            let syntax_expected = if expected == "Assembly" { "asm" } else { expected };
+            assert_eq!(syntax_selector_for_path(path), syntax_expected, "syntax selector for {file}");
         }
     }
 }
