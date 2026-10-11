@@ -28,8 +28,24 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
     match extension.as_str() {
         "js" | "mjs" | "cjs" => run_program("node", &[selected.as_os_str()], &root),
         "jsx" => run_typescript(&selected, &root, true),
-        "ts" => run_typescript(&selected, &root, false),
+        "ts" | "mts" | "cts" => run_typescript(&selected, &root, false),
         "tsx" => run_typescript(&selected, &root, true),
+        "rs" => run_rust_source(&selected, &root),
+        "cc" | "cpp" | "cxx" | "c++" => run_cpp_source(&selected, &root),
+        "go" => run_program("go", &[std::ffi::OsStr::new("run"), selected.as_os_str()], &root),
+        "java" => run_program("java", &[selected.as_os_str()], &root),
+        "rb" | "rake" => run_program("ruby", &[selected.as_os_str()], &root),
+        "php" => run_program("php", &[selected.as_os_str()], &root),
+        "lua" => run_program("lua", &[selected.as_os_str()], &root),
+        "pl" | "pm" => run_program("perl", &[selected.as_os_str()], &root),
+        "swift" => run_program("swift", &[selected.as_os_str()], &root),
+        "ex" | "exs" => run_program("elixir", &[selected.as_os_str()], &root),
+        "r" | "rscript" => run_program("Rscript", &[selected.as_os_str()], &root),
+        "coffee" => run_program("coffee", &[selected.as_os_str()], &root),
+        "tcl" => run_program("tclsh", &[selected.as_os_str()], &root),
+        "fsx" => run_program("dotnet", &[std::ffi::OsStr::new("fsi"), selected.as_os_str()], &root),
+        "groovy" => run_program("groovy", &[selected.as_os_str()], &root),
+        "dart" => run_program("dart", &[std::ffi::OsStr::new("run"), selected.as_os_str()], &root),
         "kt" => run_kotlin_source(&selected, &root),
         "kts" => run_program("kotlinc", &[std::ffi::OsStr::new("-script"), selected.as_os_str()], &root),
         "py" | "pyw" => run_python(&selected, &root),
@@ -42,7 +58,7 @@ pub fn run_file(root: &Path, selected: &Path) -> Result<String, String> {
             run_make(&selected, &root)
         }
         _ => Err(format!(
-            "Для .{} пока нет команды запуска. Поддерживаются Kotlin, TypeScript/JavaScript, Shell, Python, C, Make и XSLT.",
+            "Для .{} пока нет команды запуска. Есть рантаймы Rust, C/C++, Go, Java, Kotlin, JS/TS, Python, Shell, PowerShell, Ruby, PHP, Lua, Perl, Swift, Elixir, R, Dart, F#, Groovy, CoffeeScript, Tcl, C, Make и XSLT.",
             if extension.is_empty() { "unknown" } else { &extension }
         )),
     }
@@ -121,6 +137,78 @@ fn run_python(file: &Path, root: &Path) -> Result<String, String> {
 fn run_make(file: &Path, root: &Path) -> Result<String, String> {
     let working_directory = file.parent().unwrap_or(root);
     run_program("make", &[std::ffi::OsStr::new("-f"), file.as_os_str()], working_directory)
+}
+
+
+/// Compile and run a standalone Rust file. Cargo projects should be launched via their own workflow.
+fn run_rust_source(file: &Path, root: &Path) -> Result<String, String> {
+    run_compiled_source(
+        "rustc",
+        &[
+            std::ffi::OsStr::new("--edition=2021"),
+            std::ffi::OsStr::new("-O"),
+            file.as_os_str(),
+        ],
+        root,
+        "rust",
+        "Для запуска одиночного Rust-файла установи Rust toolchain (rustc) и добавь его в PATH. Проекты с Cargo-зависимостями требуют сборки Cargo.",
+    )
+}
+
+/// Compile and run one standalone C++ source file.
+fn run_cpp_source(file: &Path, root: &Path) -> Result<String, String> {
+    run_compiled_source(
+        "c++",
+        &[
+            std::ffi::OsStr::new("-std=c++20"),
+            std::ffi::OsStr::new("-O2"),
+            file.as_os_str(),
+        ],
+        root,
+        "cpp",
+        "Для запуска C++ установи GCC/Clang (команда c++) и добавь компилятор в PATH.",
+    )
+}
+
+fn run_compiled_source(
+    compiler: &str,
+    prefix_args: &[&std::ffi::OsStr],
+    root: &Path,
+    suffix: &str,
+    missing_message: &str,
+) -> Result<String, String> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let mut binary = std::env::temp_dir().join(format!("minux-{suffix}-{}-{stamp}", std::process::id()));
+    if cfg!(target_os = "windows") { binary.set_extension("exe"); }
+
+    let mut args: Vec<std::ffi::OsString> = prefix_args.iter().map(|arg| (*arg).to_os_string()).collect();
+    args.push(std::ffi::OsString::from("-o"));
+    args.push(binary.as_os_str().to_os_string());
+
+    let compile = Command::new(compiler)
+        .args(&args)
+        .current_dir(root)
+        .output()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                missing_message.to_owned()
+            } else {
+                format!("Не удалось запустить {compiler}: {error}")
+            }
+        })?;
+
+    if !compile.status.success() {
+        let details = format_output(compile);
+        let _ = fs::remove_file(&binary);
+        return Err(format!("Ошибка компиляции ({compiler}):\n{details}"));
+    }
+
+    let result = Command::new(&binary).current_dir(root).output()
+        .map_err(|error| format!("Сборка успешна, но бинарный файл не запустился: {error}"));
+    let _ = fs::remove_file(&binary);
+    result.and_then(|result| {
+        if result.status.success() { Ok(format_output(result)) } else { Err(format_output(result)) }
+    })
 }
 
 fn run_c(file: &Path, root: &Path) -> Result<String, String> {
