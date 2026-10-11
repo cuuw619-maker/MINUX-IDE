@@ -29,6 +29,8 @@ pub struct AiSettings {
     pub animation_speed: f32,
     pub ui_scale: f32,
     pub sidebar_width: f32,
+    pub ai_sidebar_width: f32,
+    pub output_panel_height: f32,
     pub icon_size: f32,
 }
 
@@ -47,7 +49,9 @@ impl Default for AiSettings {
             custom_accent: "#6E9BFF".into(),
             animation_speed: 1.0,
             ui_scale: 1.0,
-            sidebar_width: 260.0,
+            sidebar_width: 280.0,
+            ai_sidebar_width: 360.0,
+            output_panel_height: 220.0,
             icon_size: 18.0,
         }
     }
@@ -147,9 +151,19 @@ pub fn load_settings() -> AiSettings {
         1.0
     };
     settings.sidebar_width = if settings.sidebar_width.is_finite() {
-        settings.sidebar_width.clamp(220.0, 420.0)
+        settings.sidebar_width.clamp(220.0, 520.0)
     } else {
-        260.0
+        280.0
+    };
+    settings.ai_sidebar_width = if settings.ai_sidebar_width.is_finite() {
+        settings.ai_sidebar_width.clamp(240.0, 520.0)
+    } else {
+        360.0
+    };
+    settings.output_panel_height = if settings.output_panel_height.is_finite() {
+        settings.output_panel_height.clamp(120.0, 480.0)
+    } else {
+        220.0
     };
     settings.icon_size = if settings.icon_size.is_finite() {
         settings.icon_size.clamp(14.0, 28.0)
@@ -237,7 +251,11 @@ pub fn fetch_models(token: &str) -> Result<Vec<String>, String> {
     let response = request.send()
         .map_err(|e| format!("Не удалось получить каталог DuckDuckGo Chat API: {e}"))?;
     let status = response.status();
+    let content_type = response.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
     let body = response.text().map_err(|e| format!("Не удалось прочитать каталог моделей: {e}"))?;
+    if looks_like_html_response(&body, &content_type) {
+        return Err(html_endpoint_error(status.as_u16()));
+    }
 
     if !status.is_success() {
         return Err(format_api_error(status.as_u16(), &body));
@@ -264,7 +282,35 @@ pub fn fetch_models(token: &str) -> Result<Vec<String>, String> {
     Ok(models)
 }
 
+fn looks_like_html_response(body: &str, content_type: &str) -> bool {
+    let content_type = content_type.to_ascii_lowercase();
+    if content_type.contains("text/html") || content_type.contains("application/xhtml") {
+        return true;
+    }
+    let prefix: String = body.trim_start().chars().take(700).collect::<String>().to_ascii_lowercase();
+    prefix.starts_with("<!doctype html")
+        || prefix.starts_with("<html")
+        || (prefix.starts_with("<meta") && prefix.contains("<title") && prefix.contains("duckduckgo"))
+        || (prefix.starts_with("<head") && prefix.contains("<title") && prefix.contains("duckduckgo"))
+}
+
+fn looks_like_duckduckgo_page(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    lower.contains("duckduckgo - protection. privacy.")
+        && (lower.contains("data-next-head") || lower.contains("twitter:site")
+            || lower.contains("name=\"viewport\""))
+}
+
+fn html_endpoint_error(status: u16) -> String {
+    format!(
+        "DuckDuckGo Chat API вернул HTML-страницу вместо JSON (HTTP {status}). Похоже, endpoint переадресован на обычную страницу DuckDuckGo или Chat API сейчас недоступен. Проверь URL и доступ к API в настройках; HTML страницы больше не будет показываться как ответ модели."
+    )
+}
+
 fn format_api_error(status: u16, body: &str) -> String {
+    if looks_like_html_response(body, "") {
+        return html_endpoint_error(status);
+    }
     let parsed = serde_json::from_str::<Value>(body).ok();
     if status == 400
         && parsed.as_ref()
@@ -293,6 +339,7 @@ fn format_api_error(status: u16, body: &str) -> String {
         detail
     };
     match status {
+        301 | 302 | 303 | 307 | 308 => format!("DuckDuckGo Chat API перенаправил запрос (HTTP {status}) вместо ответа JSON. Проверь адрес endpoint и доступ к сервису."),
         401 => format!("DuckDuckGo Chat API требует корректный токен (401). Токен в настройках необязателен, если endpoint разрешает анонимные запросы. {detail}"),
         403 => format!("DuckDuckGo Chat API запретил доступ (403). Проверь доступ к сервису. {detail}"),
         404 => format!("Endpoint или модель не найдены (404). Проверь ID модели и URL сервиса. {detail}"),
@@ -444,10 +491,14 @@ fn request_assistant(
             .map_err(|e| format!("Запрос к DuckDuckGo Chat API не выполнен: {e}"))?;
 
         let status = response.status();
+        let content_type = response.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
         let body = response.text().map_err(|e| format!("Не удалось прочитать ответ модели: {e}"))?;
+        if looks_like_html_response(&body, &content_type) {
+            return Err(html_endpoint_error(status.as_u16()));
+        }
         if status.is_success() {
             let value: Value = serde_json::from_str(&body)
-                .map_err(|e| format!("Ответ модели не является JSON: {e}"))?;
+                .map_err(|_| "Ответ DuckDuckGo Chat API не является корректным JSON. Проверь URL endpoint и доступ к сервису.".to_string())?;
             return parse_assistant_message(&value);
         }
 
@@ -490,7 +541,11 @@ fn parse_assistant_message(response: &Value) -> Result<Value, String> {
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"))
-        .ok_or_else(|| format!("Ответ модели не содержит choices[0].message: {}", response.to_string().chars().take(500).collect::<String>()))?;
+        .ok_or_else(|| "DuckDuckGo Chat API вернул JSON не в формате Chat Completions (нет choices[0].message). Проверь endpoint и ID модели.".to_string())?;
+    let content = extract_text(message.get("content")).unwrap_or_default();
+    if looks_like_duckduckgo_page(&content) {
+        return Err(html_endpoint_error(200));
+    }
     Ok(message.clone())
 }
 
