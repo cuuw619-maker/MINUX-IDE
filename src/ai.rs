@@ -685,11 +685,12 @@ fn project_overview(root: &Path) -> Result<String, String> {
         "bin", "obj", ".venv", "venv", "__pycache__", ".next", ".cache", "vendor",
     ];
     const MANIFEST_NAMES: &[&str] = &[
-        "cargo.toml", "package.json", "tsconfig.json", "pyproject.toml",
-        "requirements.txt", "requirements-dev.txt", "cmakelists.txt", "makefile",
-        "go.mod", "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle",
-        "settings.gradle.kts", "composer.json", "gemfile", "dockerfile",
-        "justfile", "readme.md",
+        "cargo.toml", "package.json", "package-lock.json", "deno.json", "deno.jsonc",
+        "tsconfig.json", "pyproject.toml", "requirements.txt", "requirements-dev.txt",
+        "cmakelists.txt", "makefile", "gnumakefile", "go.mod", "go.work", "pom.xml",
+        "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
+        "composer.json", "gemfile", "dockerfile", "containerfile", "justfile",
+        "jenkinsfile", "mix.exs", "build.sbt", "pubspec.yaml", "package.swift", "readme.md",
     ];
 
     let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
@@ -786,8 +787,11 @@ fn project_language(path: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     match name.as_str() {
         "makefile" | "gnumakefile" => return Some("Make"),
-        "dockerfile" => return Some("Docker"),
+        "dockerfile" | "containerfile" => return Some("Docker"),
         "justfile" => return Some("Just"),
+        "cmakelists.txt" => return Some("CMake"),
+        "jenkinsfile" => return Some("Groovy"),
+        ".bashrc" | ".bash_profile" | ".zshrc" | ".profile" => return Some("Shell"),
         _ => {}
     }
 
@@ -795,20 +799,28 @@ fn project_language(path: &Path) -> Option<&'static str> {
     Some(match extension.as_str() {
         "rs" => "Rust",
         "c" | "h" => "C",
-        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "C++",
+        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "c++" => "C++",
+        "s" | "asm" => "Assembly",
         "cs" => "C#",
+        "fs" | "fsx" | "fsi" => "F#",
         "ts" | "tsx" | "mts" | "cts" => "TypeScript",
         "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
         "py" | "pyw" => "Python",
         "sh" | "bash" => "Shell",
-        "ps1" | "psm1" => "PowerShell",
+        "ps1" | "psm1" | "psd1" => "PowerShell",
         "xsl" | "xslt" => "XSLT",
         "xml" | "csproj" | "sln" => "XML",
         "html" | "htm" => "HTML",
         "css" | "scss" | "sass" | "less" => "CSS",
-        "json" => "JSON",
+        "json" | "jsonc" | "json5" | "jsonl" => "JSON",
         "yaml" | "yml" => "YAML",
         "md" | "mdx" => "Markdown",
+        "ini" | "cfg" | "conf" | "properties" => "Config",
+        "graphql" | "gql" => "GraphQL",
+        "coffee" => "CoffeeScript",
+        "tcl" => "Tcl",
+        "tex" | "ltx" => "LaTeX",
+        "diff" | "patch" => "Diff",
         "go" => "Go",
         "java" => "Java",
         "kt" | "kts" => "Kotlin",
@@ -818,17 +830,27 @@ fn project_language(path: &Path) -> Option<&'static str> {
         "lua" => "Lua",
         "sql" => "SQL",
         "toml" => "TOML",
-        "gradle" => "Groovy",
-        "scala" => "Scala",
-        "fs" | "fsx" => "F#",
-        "hs" => "Haskell",
-        "clj" | "cljs" => "Clojure",
+        "gradle" | "groovy" => "Groovy",
+        "scala" | "sc" => "Scala",
+        "hs" | "lhs" => "Haskell",
+        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure",
         "r" => "R",
-        "m" => "Objective-C / MATLAB",
+        "rmd" => "R Markdown",
+        "jl" => "Julia",
+        "zig" => "Zig",
+        "sol" => "Solidity",
+        "tf" | "tfvars" | "hcl" => "Terraform",
+        "nix" => "Nix",
+        "f" | "for" | "f90" | "f95" | "f03" | "f08" => "Fortran",
+        "ml" | "mli" => "OCaml",
+        "mm" => "Objective-C",
+        "m" => "MATLAB",
         "pl" | "pm" => "Perl",
         "ex" | "exs" => "Elixir",
         "erl" | "hrl" => "Erlang",
         "dart" => "Dart",
+        "toml" => "TOML",
+        "mk" | "mak" | "make" => "Make",
         "vue" => "Vue",
         "svelte" => "Svelte",
         _ => return None,
@@ -1141,6 +1163,14 @@ mod model_id_tests {
         assert_eq!(project_language(Path::new("scripts/audit.py")), Some("Python"));
         assert_eq!(project_language(Path::new("resources/themes.xsl")), Some("XSLT"));
         assert_eq!(project_language(Path::new("Makefile")), Some("Make"));
+        assert_eq!(project_language(Path::new("Containerfile")), Some("Docker"));
+        assert_eq!(project_language(Path::new("infra/main.tf")), Some("Terraform"));
+        assert_eq!(project_language(Path::new("native/main.zig")), Some("Zig"));
+        assert_eq!(project_language(Path::new("web/schema.graphql")), Some("GraphQL"));
+        assert_eq!(project_language(Path::new("scripts/run.psd1")), Some("PowerShell"));
+        assert_eq!(project_language(Path::new("tools/script.fsx")), Some("F#"));
+        assert_eq!(project_language(Path::new("science/report.Rmd")), Some("R Markdown"));
+        assert_eq!(project_language(Path::new("styles/theme.scss")), Some("CSS"));
     }
 
     #[test]
