@@ -204,7 +204,7 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
     visuals.code_bg_color = EDITOR_BG;
     visuals.hyperlink_color = accent;
     visuals.selection.bg_fill = accent_bg;
-    visuals.selection.stroke = Stroke::new(1.25, accent);
+    visuals.selection.stroke = Stroke::new(1.25_f32, accent);
     visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(radius);
@@ -213,16 +213,16 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
 
     // MINUX surfaces are dark, softly outlined, and acquire an accent edge on hover.
     visuals.widgets.inactive.bg_fill = Color32::from_rgb(29, 33, 43);
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     visuals.widgets.hovered.bg_fill = accent_bg;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.82));
-    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, accent.gamma_multiply(0.82));
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, TEXT);
     visuals.widgets.active.bg_fill = accent.gamma_multiply(0.30);
-    visuals.widgets.active.bg_stroke = Stroke::new(1.4, accent);
-    visuals.widgets.active.fg_stroke = Stroke::new(1.1, Color32::WHITE);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.4_f32, accent);
+    visuals.widgets.active.fg_stroke = Stroke::new(1.1_f32, Color32::WHITE);
     visuals.widgets.open.bg_fill = PANEL_RAISED;
-    visuals.widgets.open.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.7));
+    visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, accent.gamma_multiply(0.7));
     style.visuals = visuals;
     ctx.set_style(style);
 }
@@ -1857,7 +1857,7 @@ impl eframe::App for MinuxIde {
                             ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
                         }
                         ui.painter().rect_filled(
-                            split.rect.shrink(egui::vec2(0.0, 2.5)), egui::CornerRadius::same(2),
+                            split.rect.shrink2(egui::vec2(0.0, 2.5)), egui::CornerRadius::same(2),
                             if split.hovered() || split.dragged() { self.accent_color() } else { BORDER },
                         );
                         self.draw_output_panel(ui);
