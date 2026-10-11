@@ -1524,29 +1524,7 @@ impl MinuxIde {
                 }
             });
 
-        ui.add_space(5.0);
-        ui.add_space(5.0);
-        ui.label(RichText::new("БЫСТРЫЕ ДЕЙСТВИЯ").size(9.0).strong().color(MUTED));
-        let mut quick_task: Option<&'static str> = None;
-        ui.horizontal_wrapped(|ui| {
-            if ui.small_button("Объяснить файл").clicked() {
-                quick_task = Some("Подробно объясни назначение и логику выбранного файла. Не изменяй его.");
-            }
-            if ui.small_button("Исправить ошибки").clicked() {
-                quick_task = Some("Проверь выбранный файл на ошибки и очевидные баги. Исправь только подтверждённые проблемы и объясни изменения.");
-            }
-            if ui.small_button("Добавить тесты").clicked() {
-                quick_task = Some("Изучи выбранный файл и добавь полезные тесты в существующую тестовую структуру проекта. Используй язык и инструменты, уже применяемые в проекте.");
-            }
-        });
-        if let Some(task) = quick_task {
-            if let Some(path) = self.selected_file.clone() {
-                let relative = path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy();
-                self.send_agent_prompt(format!("{task}\nФайл: {relative}"));
-            } else {
-                self.status = "Сначала выбери файл в проводнике.".into();
-            }
-        }
+        // Quick actions were removed: the chat composer is the single, predictable way to invoke the agent.
         if !connected && ui.button("Настройки AI API").clicked() {
             self.settings_open = true;
         }
@@ -1588,7 +1566,42 @@ impl MinuxIde {
         ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new("SAMBANOVA CLOUD API").size(10.0).strong().color(self.accent_color()));
+        ui.label(RichText::new("AI-ПРОВАЙДЕР").size(10.0).strong().color(self.accent_color()));
+        ui.add_space(8.0);
+        let provider_name = if self.api_base_url.contains("api.openai.com") {
+            "OpenAI"
+        } else if self.api_base_url.contains("api.groq.com") {
+            "Groq"
+        } else if self.api_base_url.contains("generativelanguage.googleapis.com") {
+            "Google Gemini"
+        } else if self.api_base_url.contains("openrouter.ai") {
+            "OpenRouter · Claude и другие модели"
+        } else if self.api_base_url.contains("api.sambanova.ai") {
+            "SambaNova"
+        } else {
+            "Пользовательский OpenAI-compatible API"
+        };
+        egui::ComboBox::from_id_salt("minux_ai_provider")
+            .selected_text(provider_name)
+            .width(ui.available_width().min(460.0))
+            .show_ui(ui, |ui| {
+                for (label, base, model) in [
+                    ("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
+                    ("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+                    ("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash"),
+                    ("Claude через OpenRouter", "https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4"),
+                    ("SambaNova", "https://api.sambanova.ai/v1", "Meta-Llama-3.3-70B-Instruct"),
+                    ("Свой OpenAI-compatible API", "", ""),
+                ] {
+                    if ui.selectable_label(provider_name == label, label).clicked() {
+                        if !base.is_empty() {
+                            self.api_base_url = base.to_owned();
+                            self.model = model.to_owned();
+                            self.available_models.clear();
+                        }
+                    }
+                }
+            });
         ui.add_space(8.0);
         ui.label(RichText::new("Base URL API").size(12.0).color(TEXT));
         ui.add_sized(
@@ -1599,17 +1612,21 @@ impl MinuxIde {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             draw_icon(ui, &self.icons, "key-round", 16.0, self.accent_color());
-            ui.label(RichText::new("API-ключ SambaNova").size(12.0).color(TEXT));
+            ui.label(RichText::new("API-ключ выбранного провайдера").size(12.0).color(TEXT));
         });
         ui.add_sized(
             [ui.available_width().min(460.0), 34.0],
             egui::TextEdit::singleline(&mut self.api_key)
                 .password(true)
-                .hint_text("Вставь API-ключ из cloud.sambanova.ai"),
+                .hint_text("Вставь API-ключ выбранного провайдера"),
         );
         ui.add_space(5.0);
-        ui.label(RichText::new("Base URL API: https://api.sambanova.ai/v1. Для получения ключа открой панель SambaNova Cloud ниже. Ключ хранится локально в settings.json без шифрования.").size(10.0).color(ORANGE));
-        ui.hyperlink_to("Открыть cloud.sambanova.ai", "https://cloud.sambanova.ai");
+        ui.label(RichText::new("Ключ хранится локально в settings.json без шифрования. Claude доступен через OpenRouter; остальные провайдеры используют OpenAI-compatible API.").size(10.0).color(ORANGE));
+        ui.hyperlink_to("OpenAI", "https://platform.openai.com/api-keys");
+        ui.hyperlink_to("Groq", "https://console.groq.com/keys");
+        ui.hyperlink_to("Google AI Studio", "https://aistudio.google.com/apikey");
+        ui.hyperlink_to("OpenRouter (Claude)", "https://openrouter.ai/keys");
+        ui.hyperlink_to("SambaNova Cloud", "https://cloud.sambanova.ai");
         ui.add_space(16.0);
         ui.separator();
         ui.label(RichText::new("ОФОРМЛЕНИЕ").size(10.0).strong().color(self.accent_color()));
@@ -1713,7 +1730,7 @@ impl MinuxIde {
         settings_row(ui, "Syntax highlighting", "Syntect", GREEN);
         settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native C core", &format!("C · v{}", unsafe { minux_engine_version() }), GREEN);
-        settings_row(ui, "AI endpoint", "SambaNova Cloud · OpenAI-compatible", GREEN);
+        settings_row(ui, "AI endpoint", "OpenAI · Groq · Gemini · OpenRouter/Claude · SambaNova", GREEN);
         settings_row(ui, "Compiled + JVM", "Rust · C/C++ · Assembly · Fortran · Go · C# · Java/Kotlin · JS/TS · Python", GREEN);
         settings_row(ui, "Script engines", "Shell/PowerShell · Ruby/PHP · Lua/Perl · Swift · Haskell/Scala · Julia/Zig", GREEN);
         settings_row(ui, "Project tools", "Clojure · Erlang · OCaml · D · Nix · F# · Tcl · Make · XSLT · Terraform", GREEN);
@@ -1816,13 +1833,9 @@ impl MinuxIde {
                     )
                 };
                 job.wrap.max_width = wrap_width;
-                // Hex-color swatches are useful in stylesheets, but a #word in Python,
-                // YAML, TOML, or shell comments must keep the language's comment color.
-                let job = if matches!(syntax.as_str(), "CSS") {
-                    highlight_hex_colors(job)
-                } else {
-                    job
-                };
+                // Render real hexadecimal color literals as a swatch in every supported language.
+                // CSS selectors such as #6750A4:hover and #main are excluded by hex_color_spans.
+                let job = highlight_hex_colors(job);
                 ui.fonts(|fonts| fonts.layout_job(job))
             };
 
