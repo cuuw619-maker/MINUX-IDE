@@ -122,16 +122,17 @@ struct MinuxIde {
 impl Default for MinuxIde {
     fn default() -> Self {
         let settings = ai::load_settings();
-        let root = settings.recent_workspaces.iter()
+        let saved_workspace = settings.recent_workspaces.iter()
             .map(PathBuf::from)
-            .find(|path| path.is_dir())
+            .find(|path| path.is_dir());
+        let root = saved_workspace.clone()
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
         let (ai_tx, ai_rx) = mpsc::channel();
 
-        Self {
+        let mut app = Self {
             root,
-            show_home: true,
+            show_home: saved_workspace.is_none(),
             selected_file: None,
             editor_text: String::new(),
             dirty: false,
@@ -187,7 +188,11 @@ impl Default for MinuxIde {
             tree_cancel: None,
             tree_loading: false,
             tree_truncated: false,
+        };
+        if !app.show_home {
+            app.start_workspace_scan();
         }
+        app
     }
 }
 
@@ -421,13 +426,13 @@ fn icon_fallback_text(name: &str) -> &'static str {
         };
     }
     match name {
-        "folder" => "DIR", "folder-open" => "OPEN", "file-code" => "</>",
-        "file-text" => "TXT", "search" => "SR", "puzzle" => "EXT", "bot" => "AI",
-        "settings-2" => "CFG", "save" => "SV", "terminal" => "CLI",
-        "git-branch" => "GIT", "play" => "RUN", "send" => "GO",
-        "key-round" => "KEY", "brain" => "AI", "cloud-download" => "DL",
-        "folder-plus" => "+D", "file-plus" => "+F", "refresh-cw" => "RF",
-        _ => "UI",
+        "folder" => "D", "folder-open" => "O", "file-code" => "</>",
+        "file-text" => "TXT", "search" => "S", "puzzle" => "E", "bot" => "AI",
+        "settings-2" => "C", "save" => "V", "terminal" => ">_",
+        "git-branch" => "G", "play" => ">", "send" => ">",
+        "key-round" => "K", "brain" => "AI", "cloud-download" => "D",
+        "folder-plus" => "+", "file-plus" => "+", "refresh-cw" => "R",
+        _ => ".",
     }
 }
 
@@ -538,20 +543,13 @@ fn paint_icon_at(
             tint,
         );
     } else {
-        // Keep missing/malformed assets legible; use a rounded tile and a short ASCII monogram.
+        // A missing SVG must not become a solid square; render a compact glyph instead.
         let extent = rect.width().min(rect.height());
-        let fallback_rect = rect.shrink((extent * 0.04).clamp(0.5, 2.0));
-        let radius = (extent * 0.18).round().clamp(2.0, 9.0) as u8;
-        ui.painter().rect_filled(
-            fallback_rect,
-            egui::CornerRadius::same(radius),
-            tint.gamma_multiply(0.14),
-        );
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             icon_fallback_text(name),
-            egui::FontId::proportional((extent * 0.31).clamp(6.0, 15.0)),
+            egui::FontId::proportional((extent * 0.48).clamp(7.0, 18.0)),
             tint,
         );
     }
@@ -1791,8 +1789,9 @@ impl MinuxIde {
         if let Some(path) = self.selected_file.clone() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(self.root.file_name().unwrap_or_default().to_string_lossy()).size(10.0).color(MUTED));
-                draw_icon(ui, &self.icons, "folder-open", 12.0, MUTED);
-                ui.label(RichText::new(path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy()).size(10.0).color(ACCENT));
+                draw_icon(ui, &self.icons, "folder-open", 14.0, MUTED);
+                ui.label(RichText::new(path.strip_prefix(&self.root).unwrap_or(&path).to_string_lossy()).size(10.0).color(ACCENT))
+                    .on_hover_text(path.display().to_string());
             });
             ui.add_space(5.0);
 
@@ -1817,7 +1816,13 @@ impl MinuxIde {
                     )
                 };
                 job.wrap.max_width = wrap_width;
-                let job = highlight_hex_colors(job);
+                // Hex-color swatches are useful in stylesheets, but a #word in Python,
+                // YAML, TOML, or shell comments must keep the language's comment color.
+                let job = if matches!(syntax.as_str(), "CSS") {
+                    highlight_hex_colors(job)
+                } else {
+                    job
+                };
                 ui.fonts(|fonts| fonts.layout_job(job))
             };
 
@@ -1826,7 +1831,7 @@ impl MinuxIde {
                 [available.x.max(80.0), available.y.max(100.0)],
                 egui::TextEdit::multiline(&mut self.editor_text)
                     .font(egui::FontId::monospace(self.editor_font_size))
-                    .desired_width(f32::INFINITY)
+                    .desired_width(available.x.max(80.0))
                     .desired_rows(30)
                     .code_editor()
                     .frame(false)
