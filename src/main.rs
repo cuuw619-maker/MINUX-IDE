@@ -318,7 +318,14 @@ fn hex_color_spans(text: &str) -> Vec<(std::ops::Range<usize>, Color32, Color32)
             end += 1;
         }
         let digits = end.saturating_sub(i + 1);
-        let right_boundary = end == bytes.len() || !is_identifier(bytes[end]);
+        let mut after_token = end;
+        while after_token < bytes.len() && bytes[after_token].is_ascii_whitespace() {
+            after_token += 1;
+        }
+        let selector_continuation = after_token < bytes.len()
+            && matches!(bytes[after_token], b'{' | b':' | b'.' | b'[' | b'>' | b'+' | b'~');
+        let right_boundary = (end == bytes.len() || !is_identifier(bytes[end]))
+            && !selector_continuation;
         if matches!(digits, 3 | 4 | 6 | 8) && right_boundary {
             if let Some((actual, readable)) = parse_hex_color_token(&bytes[i + 1..end]) {
                 spans.push((i..end, actual, readable));
@@ -862,7 +869,7 @@ impl MinuxIde {
                 ui.set_min_width((available_width - 4.0).max(300.0));
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("ИДЕИ → КОД").size(10.0).strong().color(accent));
+                        ui.label(RichText::new("ИДЕИ / КОД").size(10.0).strong().color(accent));
                         ui.add_space(5.0);
                         ui.label(RichText::new("Большие идеи.\nЧистый код.").size(30.0).strong().color(TEXT));
                         ui.add_space(8.0);
@@ -2636,6 +2643,8 @@ mod language_support_tests {
         let (actual, _) = parse_hex_color_token(b"f00").unwrap();
         assert_eq!(actual, egui::Color32::from_rgb(255, 0, 0));
         assert!(hex_color_spans("selector #main, .class").is_empty());
+        assert!(hex_color_spans("#abc { color: white; }").is_empty());
+        assert!(hex_color_spans("#abc:hover { color: white; }").is_empty());
         assert!(hex_color_spans("invalid #12345").is_empty());
     }
 
