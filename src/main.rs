@@ -146,7 +146,7 @@ impl Default for MinuxIde {
             chat_input: String::new(),
             chat_messages: vec![ChatEntry {
                 user: false,
-                content: "MINUX Agent готов. Введи API-ключ SambaNova Cloud в настройках, обнови каталог моделей и отправь запрос.".into(),
+                content: "MINUX Agent готов. Выбери провайдера и модель в настройках, введи API-ключ, затем отправь запрос.".into(),
                 reasoning: None,
             }],
             chat_history: Vec::new(),
@@ -1575,7 +1575,7 @@ impl MinuxIde {
         } else if self.api_base_url.contains("generativelanguage.googleapis.com") {
             "Google Gemini"
         } else if self.api_base_url.contains("openrouter.ai") {
-            "OpenRouter · Claude и другие модели"
+            "Claude через OpenRouter"
         } else if self.api_base_url.contains("api.sambanova.ai") {
             "SambaNova"
         } else {
