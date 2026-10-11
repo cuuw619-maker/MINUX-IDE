@@ -869,7 +869,7 @@ impl MinuxIde {
         if self.model.trim().is_empty() {
             self.chat_messages.push(ChatEntry {
                 user: false,
-                content: "Выбери модель DuckDuckGo из списка или введи её ID вручную.".into(),
+                content: "Выбери модель из списка или введи её ID вручную.".into(),
                 reasoning: None,
             });
             self.settings_open = true;
@@ -1276,7 +1276,7 @@ impl MinuxIde {
                 self.status = "Сначала выбери файл в проводнике.".into();
             }
         }
-        if !connected && ui.button("Настроить DuckDuckGo API").clicked() {
+        if !connected && ui.button("Настройки AI API").clicked() {
             self.settings_open = true;
         }
         ui.horizontal(|ui| {
@@ -1659,7 +1659,7 @@ impl eframe::App for MinuxIde {
                         Ok(models) => {
                             let count = models.len();
                             self.available_models = models;
-                            self.status = format!("DuckDuckGo Chat API: загружено моделей — {count}");
+                            self.status = format!("AI API: загружено моделей — {count}");
                         }
                         Err(error) => self.status = error,
                     }
