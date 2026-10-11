@@ -212,6 +212,9 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
     visuals.hyperlink_color = accent;
     visuals.selection.bg_fill = accent_bg;
     visuals.selection.stroke = Stroke::new(1.25_f32, accent);
+    // Radius affects paint geometry only. Keep it bounded so rounded corners never
+    // consume the control's usable area or make compact widgets look distorted.
+    let radius = radius.min(9);
     visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(radius);
     visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(radius);
@@ -1651,7 +1654,7 @@ impl MinuxIde {
             }
             ui.label(RichText::new(&self.custom_accent).monospace().size(10.0).color(MUTED));
         });
-        ui.add(egui::Slider::new(&mut self.corner_radius, 3..=14).text("Закругление"));
+        ui.add(egui::Slider::new(&mut self.corner_radius, 0..=9).text("Закругление углов"));
         ui.add(egui::Slider::new(&mut self.editor_font_size, 11.0..=30.0).step_by(0.5).text("Размер шрифта редактора"));
         ui.add(egui::Slider::new(&mut self.animation_speed, 0.5..=2.0).step_by(0.1).text("Скорость переходов"));
         ui.add(egui::Slider::new(&mut self.ui_scale, 0.75..=1.50).step_by(0.05).text("Масштаб интерфейса"));
@@ -2363,21 +2366,38 @@ fn activity_button(
     animations_enabled: bool,
     animation_speed: f32,
 ) -> egui::Response {
-    let button_size = ui.available_width().min(46.0).max(38.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::click());
+    let button_width = ui.available_width().min(44.0).max(38.0);
+    let button_height = 43.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(button_width, button_height), egui::Sense::click());
     let accent = ui.style().visuals.hyperlink_color;
     let accent_bg = ui.style().visuals.selection.bg_fill;
     let hover_target = response.hovered() || selected;
     let hover_t = if animations_enabled {
-        let duration = 0.15 / animation_speed.clamp(0.5, 2.0);
+        let duration = 0.22 / animation_speed.clamp(0.5, 2.0);
         let raw = ui.ctx().animate_bool_with_time(response.id.with("hover"), hover_target, duration);
         unsafe { minux_ease_out_quint(raw) }
     } else if hover_target { 1.0 } else { 0.0 };
+    // Capsule-shaped hit target and active surface; icon geometry stays constant.
     if hover_t > 0.01 {
-        ui.painter().rect_filled(rect, egui::CornerRadius::same(5),
-            (if selected { accent_bg } else { PANEL_RAISED }).gamma_multiply(hover_t));
+        let pill = egui::Rect::from_center_size(
+            rect.center(),
+            egui::vec2(rect.width() - 2.0, rect.height() - 3.0),
+        );
+        ui.painter().rect_filled(
+            pill,
+            egui::CornerRadius::same((pill.height() * 0.5) as u8),
+            (if selected { accent_bg } else { PANEL_RAISED }).gamma_multiply(hover_t),
+        );
+        if selected {
+            ui.painter().rect_stroke(
+                pill,
+                egui::CornerRadius::same((pill.height() * 0.5) as u8),
+                Stroke::new(1.0, accent.gamma_multiply(0.30 * hover_t)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
-    let icon_extent = (icon_size.clamp(14.0, 28.0) * (0.94 + 0.06 * hover_t)).min(rect.width() - 10.0);
+    let icon_extent = icon_size.clamp(14.0, 28.0).min(rect.width() - 10.0);
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_extent, icon_extent));
     paint_icon_at(ui, icons, icon_name, icon_rect, if selected { accent } else { MUTED });
     response.on_hover_text(tooltip)
