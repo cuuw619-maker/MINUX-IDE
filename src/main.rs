@@ -2005,7 +2005,14 @@ impl eframe::App for MinuxIde {
         if self.show_home {
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(BG))
-                .show(ctx, |ui| self.draw_home(ui));
+                .show(ctx, |ui| {
+                    // Allow the complete start screen to scroll on compact windows and
+                    // at enlarged UI scales; the recent-project list keeps its own scroll.
+                    egui::ScrollArea::vertical()
+                        .id_salt("minux-home-page-scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| self.draw_home(ui));
+                });
             if self.animations_enabled && view_progress > 0.001 {
                 paint_transition_overlay(ctx, (view_progress * 68.0) as u8);
                 ctx.request_repaint_after(Duration::from_millis(16));
