@@ -1,4 +1,10 @@
-# MINUX IDE
+<div align="center">
+  <img src="assets/minux-logo.svg" alt="MINUX IDE logo" width="128" height="128" />
+  <h1>MINUX IDE</h1>
+  <p>Native polyglot coding environment with an integrated AI coding agent.</p>
+</div>
+
+---
 
 MINUX IDE is a native desktop coding environment with a SambaNova Cloud coding agent, configurable appearance, high-resolution language icons and a user-triggered polyglot run command.
 
@@ -49,8 +55,8 @@ Responsibilities are split by purpose: Rust/egui owns the desktop host and state
 ## Editor and customization
 
 - Initial screen uses a project-launch hero, visual language badges, recent-project entries and quick access to appearance settings.
-- The AI sidebar fades and slides open/closed, the output panel expands/collapses, hover states respect the animation toggle/speed, and a single accent line travels between activity-rail buttons instead of blinking between fixed markers. The initial screen has an animated accent glow and floating logo, icon-first project actions and readable recent-project rows. Explorer and AI panel boundaries have wide drag targets and clearer resize grips. The workspace sidebar stays mounted when switching Explorer/Search/Languages, preventing scrollbars from abruptly vanishing. Transition speed is configurable. UI zoom ranges from 75% to 150%.
-- Settings include four built-in palettes, custom accent color, corner radius, editor font size up to 30 px, UI zoom, Explorer width (220–520 px), AI panel width (240–520 px), output panel height (120–480 px), icon size (14–28 px), animation speed, selected model and response token limit. Explorer and AI widths can be resized by dragging the foreground grip centered on each panel boundary; the grip stays interactive above scrollbars and child widgets, and the new width is saved when dragging stops. The output panel has a draggable split bar. These dimensions persist with the rest of the local settings.
+- The AI sidebar fades and slides open/closed, the output panel expands/collapses, hover states respect the animation toggle/speed, and one shared capsule-shaped selection indicator glides between activity-rail buttons with a smooth eased transition. The initial screen has an animated accent glow and floating logo, icon-first project actions and readable recent-project rows. Explorer and AI panel boundaries have wide drag targets and clearer resize grips. The workspace sidebar stays mounted when switching Explorer/Search/Languages, preventing scrollbars from abruptly vanishing. Transition speed is configurable. UI zoom ranges from 75% to 150%.
+- Settings include four built-in palettes, custom accent color, corner radius (bounded to avoid distorting compact controls), editor font size up to 30 px, UI zoom, Explorer width (220–520 px), AI panel width (240–520 px), output panel height (120–480 px), icon size (14–28 px), animation speed, selected model and response token limit. Explorer and AI widths can be resized by dragging the foreground grip centered on each panel boundary; the grip stays interactive above scrollbars and child widgets, and the new width is saved when dragging stops. The output panel has a draggable split bar. These dimensions persist with the rest of the local settings.
 - C v4 handles ranked exact/prefix/substring/fuzzy scoring for filenames and relative paths, model-ID checks, and bounded easing curves. The workspace search gives basename matches priority while still finding files by directory name.
 - SVG icon assets are bundled locally and rasterized at 128×128 before display to keep large home-screen symbols sharp; normalization fixes `currentColor`/black-only glyphs while preserving native Devicon brand colors. Hex color literals (`#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`) in the editor get a color-matched foreground, subtle swatch and underline on top of the normal syntax theme. Missing or invalid textures fall back to rounded tiles with readable ASCII monograms instead of blank squares or missing-glyph symbols. The language catalog includes distinct SVGs for more than 50 languages and tools, including Go, Java, Kotlin, Swift, Julia, Zig, Solidity, Terraform/HCL, Nix, Fortran, OCaml, Objective-C, MATLAB, Docker, GraphQL and CMake.
 - Workspace indexing runs in a cancellable worker; generated directories are ignored and tree/search rows are virtualized.
