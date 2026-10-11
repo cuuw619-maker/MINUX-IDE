@@ -42,16 +42,16 @@ enum AiEvent {
     RunFinished(Result<String, String>),
 }
 
-const BG: Color32 = Color32::from_rgb(18, 20, 26);
-const PANEL: Color32 = Color32::from_rgb(23, 26, 33);
-const PANEL_RAISED: Color32 = Color32::from_rgb(29, 33, 42);
-const EDITOR_BG: Color32 = Color32::from_rgb(20, 23, 30);
-const RAIL_BG: Color32 = Color32::from_rgb(16, 18, 24);
-const BORDER: Color32 = Color32::from_rgb(43, 48, 60);
-const TEXT: Color32 = Color32::from_rgb(222, 227, 236);
-const MUTED: Color32 = Color32::from_rgb(137, 146, 163);
+const BG: Color32 = Color32::from_rgb(15, 18, 26);
+const PANEL: Color32 = Color32::from_rgb(21, 25, 35);
+const PANEL_RAISED: Color32 = Color32::from_rgb(29, 35, 48);
+const EDITOR_BG: Color32 = Color32::from_rgb(16, 20, 29);
+const RAIL_BG: Color32 = Color32::from_rgb(13, 16, 23);
+const BORDER: Color32 = Color32::from_rgb(43, 51, 68);
+const TEXT: Color32 = Color32::from_rgb(228, 233, 244);
+const MUTED: Color32 = Color32::from_rgb(145, 157, 178);
 const ACCENT: Color32 = Color32::from_rgb(110, 155, 255);
-const ACCENT_BG: Color32 = Color32::from_rgb(35, 48, 74);
+const ACCENT_BG: Color32 = Color32::from_rgb(37, 48, 79);
 const GREEN: Color32 = Color32::from_rgb(125, 201, 155);
 const ORANGE: Color32 = Color32::from_rgb(230, 177, 112);
 const RED: Color32 = Color32::from_rgb(229, 126, 137);
@@ -856,7 +856,7 @@ impl MinuxIde {
                 ui.set_min_width((available_width - 4.0).max(300.0));
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("YOUR NEXT").size(10.0).strong().color(accent));
+                        ui.label(RichText::new("ИДЕИ → КОД").size(10.0).strong().color(accent));
                         ui.add_space(5.0);
                         ui.label(RichText::new("Большие идеи.\nЧистый код.").size(30.0).strong().color(TEXT));
                         ui.add_space(8.0);
@@ -1724,7 +1724,10 @@ impl MinuxIde {
             ui.add_space(5.0);
             ui.label(RichText::new("Среда разработки для твоих проектов").size(13.0).color(MUTED));
             ui.add_space(28.0);
-            if ui.button(RichText::new("＋   Открыть папку проекта").size(13.0)).clicked() {
+            if home_action_button(
+                ui, &self.icons, "Открыть папку проекта", "folder-open", 236.0,
+                true, ACCENT, self.animations_enabled, self.animation_speed,
+            ).clicked() {
                 self.open_workspace();
             }
             ui.add_space(8.0);
