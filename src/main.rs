@@ -145,7 +145,7 @@ impl Default for MinuxIde {
             chat_input: String::new(),
             chat_messages: vec![ChatEntry {
                 user: false,
-                content: "MINUX Agent готов. Настрой Base URL OpenAI-совместимого API, выбери модель и отправь запрос. Токен обязателен только для тех провайдеров, которые его требуют.".into(),
+                content: "MINUX Agent готов. Введи API-ключ SambaNova Cloud в настройках, обнови каталог моделей и отправь запрос.".into(),
                 reasoning: None,
             }],
             chat_history: Vec::new(),
@@ -214,7 +214,7 @@ fn apply_theme(ctx: &egui::Context, accent: Color32, accent_bg: Color32, radius:
     visuals.widgets.open.corner_radius = egui::CornerRadius::same(radius);
 
     // MINUX surfaces are dark, softly outlined, and acquire an accent edge on hover.
-    visuals.widgets.inactive.bg_fill = Color32::from_rgb(29, 33, 43);
+    visuals.widgets.inactive.bg_fill = PANEL_RAISED;
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER);
     visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     visuals.widgets.hovered.bg_fill = accent_bg;
@@ -1597,7 +1597,8 @@ impl MinuxIde {
                 .hint_text("Вставь API-ключ из cloud.sambanova.ai"),
         );
         ui.add_space(5.0);
-        ui.label(RichText::new("Веб-панель: cloud.sambanova.ai. API endpoint: api.sambanova.ai/v1. Нужен API-ключ SambaNova Cloud; он хранится локально в settings.json без шифрования.").size(10.0).color(ORANGE));
+        ui.label(RichText::new("Base URL API: https://api.sambanova.ai/v1. Для получения ключа открой панель SambaNova Cloud ниже. Ключ хранится локально в settings.json без шифрования.").size(10.0).color(ORANGE));
+        ui.hyperlink_to("Открыть cloud.sambanova.ai", "https://cloud.sambanova.ai");
         ui.add_space(16.0);
         ui.separator();
         ui.label(RichText::new("ОФОРМЛЕНИЕ").size(10.0).strong().color(self.accent_color()));
