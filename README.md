@@ -1,6 +1,6 @@
 # MINUX IDE
 
-MINUX IDE is a native desktop coding environment with a DuckDuckGo Chat API agent, configurable appearance, language-specific icons and a user-triggered polyglot run command.
+MINUX IDE is a native desktop coding environment with a SambaNova Cloud coding agent, configurable appearance, high-resolution language icons and a user-triggered polyglot run command.
 
 ## Build
 
@@ -20,13 +20,13 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 GitHub Actions is **manual-only**. Start it from the Actions page with **Run workflow**. It validates TypeScript/JavaScript, regenerates the XSLT theme catalog, audits the polyglot sources, and builds the Windows executable. No workflow is triggered by a push.
 
-## MINUX Agent / DuckDuckGo Chat API
+## MINUX Agent / SambaNova Cloud API
 
 1. Open Settings and choose a model from the built-in list or refresh the model catalog from the endpoint.
 2. Enter a token only if the endpoint requires one; requests without a token are attempted when the field is empty.
 3. Save settings and open the Agent panel.
 
-The AI API Base URL is editable in Settings and defaults to `https://duckduckgo.com/duckduckgo-html-api/v1`; MINUX appends `/chat/completions` and `/models`. Any OpenAI-compatible provider can be used by entering its Base URL (for example, `https://api.openai.com/v1`) and the token required by that provider. If the DuckDuckGo endpoint returns HTTP 410 Gone, it has been retired or disabled server-side; MINUX now reports that directly instead of retrying it endlessly, and you must switch to a working provider URL. Automatic HTTP redirects are disabled so the app reports the original status and `Location` header rather than silently following a redirect to an HTML page. HTML and non-Chat-Completions JSON are never inserted into the chat as model output. Requests run on worker threads; the token is sent as a Bearer token only when one is entered.
+The AI API Base URL defaults to `https://api.sambanova.ai/v1`. The website `cloud.sambanova.ai` is used to manage your account and API key; it is not the API endpoint. MINUX appends `/chat/completions` and `/models` to the configured Base URL and automatically migrates old DuckDuckGo settings to SambaNova on startup, clearing any obsolete provider token and selecting a SambaNova model. Refresh the model list to see the current catalog. Automatic HTTP redirects are disabled so the app reports the original status and `Location` header instead of silently following a redirect to an HTML page. HTTP 410 and HTML responses are explained rather than inserted into chat as model output. Requests run on worker threads; the API key is saved locally in `%APPDATA%\\MINUX-IDE\\settings.json` without encryption.
 
 The agent can inspect a bounded project overview (language mix and build manifests), list workspace files, search text across bounded project trees, read text files, create folders/files, and edit files. For cross-language tasks it is instructed to extend the existing architecture instead of defaulting to Rust for every component. It also has a safe `replace_in_file` tool that only edits a fragment when it occurs exactly once, reducing accidental broad rewrites. Temporary HTTP failures (429/5xx) receive a small bounded backoff. Paths are restricted to the opened project, reads/writes are limited to 2 MiB, secret files are blocked, and agent tools do not delete files or execute shell commands.
 
@@ -49,10 +49,10 @@ Responsibilities are split by purpose: Rust/egui owns the desktop host and state
 ## Editor and customization
 
 - Initial screen uses a project-launch hero, visual language badges, recent-project entries and quick access to appearance settings.
-- The AI sidebar fades and slides open/closed, the output panel expands/collapses, hover states respect the animation toggle/speed, and a single accent line travels between activity-rail buttons instead of blinking between fixed markers. The workspace sidebar stays mounted when switching Explorer/Search/Languages, preventing scrollbars from abruptly vanishing. Transition speed is configurable. UI zoom ranges from 75% to 150%.
+- The AI sidebar fades and slides open/closed, the output panel expands/collapses, hover states respect the animation toggle/speed, and a single accent line travels between activity-rail buttons instead of blinking between fixed markers. The initial screen has an animated accent glow and floating logo, icon-first project actions and readable recent-project rows. Explorer and AI panel boundaries have wide drag targets and clearer resize grips. The workspace sidebar stays mounted when switching Explorer/Search/Languages, preventing scrollbars from abruptly vanishing. Transition speed is configurable. UI zoom ranges from 75% to 150%.
 - Settings include four built-in palettes, custom accent color, corner radius, editor font size up to 30 px, UI zoom, Explorer width (220–520 px), AI panel width (240–520 px), output panel height (120–480 px), icon size (14–28 px), animation speed, selected model and response token limit. Explorer and AI widths can be resized by dragging the foreground grip centered on each panel boundary; the grip stays interactive above scrollbars and child widgets, and the new width is saved when dragging stops. The output panel has a draggable split bar. These dimensions persist with the rest of the local settings.
 - C v4 handles ranked exact/prefix/substring/fuzzy scoring for filenames and relative paths, model-ID checks, and bounded easing curves. The workspace search gives basename matches priority while still finding files by directory name.
-- SVG icon assets are bundled locally and rasterized at 128×128 before display to keep large home-screen symbols sharp; normalization fixes `currentColor`/black-only glyphs while preserving native Devicon brand colors. Missing or invalid textures fall back to rounded tiles with readable ASCII monograms instead of blank squares or missing-glyph symbols. The language catalog includes distinct SVGs for more than 50 languages and tools, including Go, Java, Kotlin, Swift, Julia, Zig, Solidity, Terraform/HCL, Nix, Fortran, OCaml, Objective-C, MATLAB, Docker, GraphQL and CMake.
+- SVG icon assets are bundled locally and rasterized at 128×128 before display to keep large home-screen symbols sharp; normalization fixes `currentColor`/black-only glyphs while preserving native Devicon brand colors. Hex color literals (`#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`) in the editor get a color-matched foreground, subtle swatch and underline on top of the normal syntax theme. Missing or invalid textures fall back to rounded tiles with readable ASCII monograms instead of blank squares or missing-glyph symbols. The language catalog includes distinct SVGs for more than 50 languages and tools, including Go, Java, Kotlin, Swift, Julia, Zig, Solidity, Terraform/HCL, Nix, Fortran, OCaml, Objective-C, MATLAB, Docker, GraphQL and CMake.
 - Workspace indexing runs in a cancellable worker; generated directories are ignored and tree/search rows are virtualized.
 
 ## Run button
