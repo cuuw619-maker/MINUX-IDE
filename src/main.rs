@@ -157,7 +157,7 @@ impl Default for MinuxIde {
             available_models: Vec::new(),
             theme_accent: if settings.theme_accent == "custom" || theme::valid_id(&settings.theme_accent) { settings.theme_accent.clone() } else { theme::default_id().to_owned() },
             custom_accent: settings.custom_accent,
-            corner_radius: settings.corner_radius.clamp(3, 14),
+            corner_radius: settings.corner_radius.clamp(0, 9),
             animations_enabled: settings.animations_enabled,
             animation_speed: settings.animation_speed.clamp(0.5, 2.0),
             ui_scale: settings.ui_scale.clamp(0.75, 1.50),
