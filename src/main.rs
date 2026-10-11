@@ -1192,19 +1192,6 @@ impl MinuxIde {
             ui.label(RichText::new("LOCAL").size(9.0).color(GREEN));
         });
         ui.label(RichText::new(self.root.to_string_lossy()).size(10.0).color(MUTED));
-        let bounds = ui.max_rect();
-        let handle = egui::Rect::from_min_max(
-            egui::pos2(bounds.right() - 5.0, bounds.top()),
-            egui::pos2(bounds.right(), bounds.bottom()),
-        );
-        let resize = ui.interact(handle, egui::Id::new("minux-sidebar-width-grip"), egui::Sense::drag());
-        if resize.dragged() {
-            self.sidebar_width = (self.sidebar_width + resize.drag_delta().x).clamp(220.0, 520.0);
-        }
-        if resize.hovered() || resize.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-            ui.painter().rect_filled(handle, egui::CornerRadius::same(1), self.accent_color().gamma_multiply(0.45));
-        }
     }
 
     fn draw_ai_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -1307,19 +1294,6 @@ impl MinuxIde {
                 }
             });
         });
-        let bounds = ui.max_rect();
-        let handle = egui::Rect::from_min_max(
-            egui::pos2(bounds.left(), bounds.top()),
-            egui::pos2(bounds.left() + 5.0, bounds.bottom()),
-        );
-        let resize = ui.interact(handle, egui::Id::new("minux-ai-sidebar-width-grip"), egui::Sense::drag());
-        if resize.dragged() {
-            self.ai_sidebar_width = (self.ai_sidebar_width - resize.drag_delta().x).clamp(240.0, 520.0);
-        }
-        if resize.hovered() || resize.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-            ui.painter().rect_filled(handle, egui::CornerRadius::same(1), self.accent_color().gamma_multiply(0.45));
-        }
     }
 
     fn draw_settings(&mut self, ui: &mut egui::Ui) {
@@ -1850,14 +1824,15 @@ impl eframe::App for MinuxIde {
                 }
             });
         let responsive_panel_max = ((ctx.screen_rect().width() - 370.0) / 2.0).clamp(240.0, 520.0);
-        egui::SidePanel::left("workspace_sidebar")
+        let workspace_panel_rect = egui::SidePanel::left("workspace_sidebar")
             .exact_width(self.sidebar_width.clamp(220.0, responsive_panel_max))
             .resizable(false)
             .frame(egui::Frame::new()
                 .fill(PANEL)
                 .stroke(Stroke::new(1.0_f32, BORDER))
                 .inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
-            .show(ctx, |ui| self.draw_sidebar(ui));
+            .show(ctx, |ui| self.draw_sidebar(ui))
+            .response.rect;
 
         let ai_panel_progress = if self.animations_enabled {
             let duration = 0.30 / self.animation_speed.clamp(0.5, 2.0);
@@ -1868,14 +1843,18 @@ impl eframe::App for MinuxIde {
                 unsafe { minux_ease_in_out_cubic(raw) }
             }
         } else if self.show_ai { 1.0 } else { 0.0 };
+        let mut ai_panel_rect = None;
         if self.show_ai || ai_panel_progress > 0.01 {
-            egui::SidePanel::right("ai_sidebar")
-                .exact_width((self.ai_sidebar_width.clamp(240.0, responsive_panel_max) * ai_panel_progress).max(1.0))
-                .min_width(0.0)
-                .max_width(520.0)
-                .resizable(false)
-                .frame(egui::Frame::new().fill(PANEL.gamma_multiply(ai_panel_progress.max(0.02))).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
-                .show(ctx, |ui| self.draw_ai_sidebar(ui));
+            ai_panel_rect = Some(
+                egui::SidePanel::right("ai_sidebar")
+                    .exact_width((self.ai_sidebar_width.clamp(240.0, responsive_panel_max) * ai_panel_progress).max(1.0))
+                    .min_width(0.0)
+                    .max_width(520.0)
+                    .resizable(false)
+                    .frame(egui::Frame::new().fill(PANEL.gamma_multiply(ai_panel_progress.max(0.02))).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(egui::Margin::same(self.corner_radius as i8 + 4)))
+                    .show(ctx, |ui| self.draw_ai_sidebar(ui))
+                    .response.rect
+            );
         }
 
         egui::CentralPanel::default()
@@ -1945,7 +1924,107 @@ impl eframe::App for MinuxIde {
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
         }
+
+        let workspace_grip = show_vertical_resize_grip(
+            ctx,
+            "minux-workspace-resize-grip",
+            workspace_panel_rect,
+            true,
+            self.accent_color(),
+        );
+        if workspace_grip.delta_x.abs() > 0.0 {
+            self.sidebar_width = (self.sidebar_width + workspace_grip.delta_x)
+                .clamp(220.0, responsive_panel_max);
+        }
+        if workspace_grip.drag_stopped {
+            let _ = ai::save_settings(&self.current_ai_settings());
+        }
+
+        if self.show_ai && ai_panel_progress > 0.95 {
+            if let Some(panel_rect) = ai_panel_rect {
+                let ai_grip = show_vertical_resize_grip(
+                    ctx,
+                    "minux-ai-resize-grip",
+                    panel_rect,
+                    false,
+                    self.accent_color(),
+                );
+                if ai_grip.delta_x.abs() > 0.0 {
+                    self.ai_sidebar_width = (self.ai_sidebar_width - ai_grip.delta_x)
+                        .clamp(240.0, responsive_panel_max);
+                }
+                if ai_grip.drag_stopped {
+                    let _ = ai::save_settings(&self.current_ai_settings());
+                }
+            }
+        }
     }
+}
+
+#[derive(Default, Clone, Copy)]
+struct VerticalResizeGripResult {
+    delta_x: f32,
+    drag_stopped: bool,
+}
+
+fn show_vertical_resize_grip(
+    ctx: &egui::Context,
+    id: &'static str,
+    panel_rect: egui::Rect,
+    on_right_edge: bool,
+    accent: Color32,
+) -> VerticalResizeGripResult {
+    if panel_rect.height() <= 0.0 {
+        return VerticalResizeGripResult::default();
+    }
+
+    // Center a wide, foreground hit target over the actual panel border.
+    // This keeps resizing usable even when a scroll area or a child widget reaches the edge.
+    let width = 16.0;
+    let left = if on_right_edge {
+        panel_rect.right() - width * 0.5
+    } else {
+        panel_rect.left() - width * 0.5
+    };
+    let size = egui::vec2(width, panel_rect.height());
+    let position = egui::pos2(left, panel_rect.top());
+    let mut result = VerticalResizeGripResult::default();
+
+    egui::Area::new(egui::Id::new(id))
+        .order(egui::Order::Foreground)
+        .fixed_pos(position)
+        .movable(false)
+        .interactable(true)
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
+            result.delta_x = response.drag_delta().x;
+            result.drag_stopped = response.drag_stopped();
+
+            let active = response.hovered() || response.dragged();
+            if active {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                ui.painter().rect_filled(
+                    rect,
+                    egui::CornerRadius::same(4),
+                    accent.gamma_multiply(0.14),
+                );
+                response.on_hover_text("Перетащи границу, чтобы изменить ширину меню");
+            }
+
+            let pill_height = rect.height().clamp(36.0, 64.0);
+            let pill = egui::Rect::from_center_size(
+                rect.center(),
+                egui::vec2(if active { 3.0 } else { 2.0 }, pill_height),
+            );
+            ui.painter().rect_filled(
+                pill,
+                egui::CornerRadius::same(2),
+                if active { accent } else { MUTED.gamma_multiply(0.45) },
+            );
+        });
+
+    result
 }
 
 fn paint_transition_overlay(ctx: &egui::Context, alpha: u8) {
