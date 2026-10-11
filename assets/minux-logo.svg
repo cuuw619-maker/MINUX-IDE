@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">MINUX IDE</title>
+  <desc id="desc">A deep navy rounded-square app icon with a luminous blue M-shaped code mark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="18" y1="12" x2="238" y2="246" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#202B43"/>
+      <stop offset="1" stop-color="#0B101B"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="50" y1="70" x2="205" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8CB8FF"/>
+      <stop offset="1" stop-color="#4779F5"/>
+    </linearGradient>
+    <filter id="glow" x="20" y="30" width="216" height="196" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg)"/>
+  <rect x="9" y="9" width="238" height="238" rx="57" stroke="#8CB8FF" stroke-opacity=".22" stroke-width="2"/>
+  <path d="M49 184V73h28l51 63 51-63h28v111h-31v-65l-48 57-48-57v65H49Z" fill="url(#mark)" filter="url(#glow)"/>
+  <path d="M49 184V73h28l51 63 51-63h28v111h-31v-65l-48 57-48-57v65H49Z" fill="url(#mark)"/>
+  <circle cx="205" cy="49" r="6" fill="#A9CCFF"/>
+</svg>
