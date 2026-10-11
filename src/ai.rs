@@ -1094,7 +1094,11 @@ fn write_workspace_file(root: &Path, relative: &str, content: &str) -> Result<St
 #[cfg(test)]
 mod model_id_tests {
     use std::path::Path;
-    use super::{normalize_duckduckgo_model_id, normalize_hex_color, normalize_model_id, project_language, replace_exactly_once};
+    use super::{
+        html_endpoint_error, looks_like_duckduckgo_page, looks_like_html_response,
+        normalize_duckduckgo_model_id, normalize_hex_color, normalize_model_id,
+        project_language, replace_exactly_once,
+    };
 
     #[test]
     fn repairs_concatenated_legacy_model_id() {
@@ -1137,6 +1141,17 @@ mod model_id_tests {
         assert_eq!(project_language(Path::new("scripts/audit.py")), Some("Python"));
         assert_eq!(project_language(Path::new("resources/themes.xsl")), Some("XSLT"));
         assert_eq!(project_language(Path::new("Makefile")), Some("Make"));
+    }
+
+    #[test]
+    fn rejects_duckduckgo_landing_page_instead_of_showing_html_as_chat() {
+        let html = r#"<meta name="viewport" content="width=device-width">
+            <title data-next-head="">DuckDuckGo - Protection. Privacy. Peace of mind.</title>
+            <meta name="description" content="The Internet privacy company.">"#;
+        assert!(looks_like_html_response(html, "text/html; charset=utf-8"));
+        assert!(looks_like_duckduckgo_page(html));
+        assert!(!looks_like_html_response(r#"{"choices":[{"message":{"content":"hello"}}]}"#, "application/json"));
+        assert!(html_endpoint_error(200).contains("HTML-страницу"));
     }
 
     #[test]
