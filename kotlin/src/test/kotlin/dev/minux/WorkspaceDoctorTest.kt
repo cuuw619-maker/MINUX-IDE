@@ -37,7 +37,7 @@ class WorkspaceDoctorTest {
         Files.writeString(workspace.resolve("analysis/report.Rmd"), "---\ntitle: demo\n---\n")
         Files.writeString(workspace.resolve("scripts/deploy.ps1"), "Write-Output 'ok'\n")
         Files.writeString(workspace.resolve("docs/readme.tex"), "\\documentclass{article}\n")
-        Files.writeString(workspace.resolve("build/Makefile"), "all:\n\t@echo ok\n")
+        Files.writeString(workspace.resolve("scripts/Makefile"), "all:\n\t@echo ok\n")
 
         val report = WorkspaceDoctor.inspect(workspace)
 
@@ -56,7 +56,7 @@ class WorkspaceDoctorTest {
         assertEquals(1, report.languageCounts["LaTeX"])
         assertEquals(1, report.languageCounts["Make"])
         assertTrue(report.buildFiles.contains("Cargo.toml"))
-        assertTrue(report.buildFiles.contains("build/Makefile"))
+        assertTrue(report.buildFiles.contains("scripts/Makefile"))
         assertEquals(1, report.todoFindings.size)
         assertEquals("TODO", report.todoFindings.single().marker)
         assertEquals(2, report.todoFindings.single().line)
