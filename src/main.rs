@@ -245,12 +245,15 @@ fn normalize_svg_color_attribute(svg: &str, attribute: &str) -> String {
         let end = value_start + relative_end;
         output.push_str(&svg[cursor..value_start]);
         let value = &svg[value_start..end];
-        if matches!(value.to_ascii_lowercase().as_str(), "none" | "transparent")
-            || value.starts_with("url(")
-        {
+        let lower = value.to_ascii_lowercase();
+        if matches!(lower.as_str(), "none" | "transparent") || lower.starts_with("url(") {
             output.push_str(value);
-        } else {
+        } else if matches!(lower.as_str(), "#000" | "#000000" | "black") {
+            // Prevent black-only glyphs from disappearing against MINUX dark surfaces.
             output.push_str("#FFFFFF");
+        } else {
+            // Preserve native brand colors (Devicon) instead of flattening them to monochrome.
+            output.push_str(value);
         }
         cursor = end;
     }
@@ -2138,6 +2141,16 @@ mod native_search_engine_tests {
 mod language_support_tests {
     use super::{file_icon_key_for_path, language_display_name, syntax_selector_for_path};
     use std::path::Path;
+
+    #[test]
+    fn normalizes_svg_without_erasing_language_brand_colors() {
+        use super::normalize_icon_svg;
+        let svg = r##"<svg stroke="currentColor" fill="#e34c26"><path d="M0 0" /></svg>"##;
+        let normalized = normalize_icon_svg(svg);
+        assert!(normalized.contains("stroke=\"#FFFFFF\""));
+        assert!(normalized.contains("fill=\"#e34c26\""));
+        assert!(!normalized.contains("currentColor"));
+    }
 
     #[test]
     fn maps_common_languages_to_distinct_icons() {
