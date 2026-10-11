@@ -57,6 +57,7 @@ object WorkspaceDoctor {
     private val languageByExtension = mapOf(
         "kt" to "Kotlin", "kts" to "Kotlin", "rs" to "Rust", "c" to "C",
         "h" to "C/C++ Header", "cc" to "C++", "cpp" to "C++", "cxx" to "C++", "c++" to "C++",
+        "s" to "Assembly", "asm" to "Assembly",
         "hpp" to "C++ Header", "hh" to "C++ Header", "hxx" to "C++ Header",
         "cs" to "C#", "fs" to "F#", "fsx" to "F#", "fsi" to "F#", "ts" to "TypeScript",
         "tsx" to "TypeScript", "mts" to "TypeScript", "cts" to "TypeScript",
@@ -66,7 +67,8 @@ object WorkspaceDoctor {
         "java" to "Java", "go" to "Go", "php" to "PHP", "rb" to "Ruby", "swift" to "Swift",
         "lua" to "Lua", "sql" to "SQL", "dart" to "Dart", "pl" to "Perl", "pm" to "Perl",
         "r" to "R", "scala" to "Scala", "hs" to "Haskell", "clj" to "Clojure",
-        "cljs" to "Clojure", "erl" to "Erlang", "ex" to "Elixir", "exs" to "Elixir",
+        "cljs" to "Clojure", "cljc" to "Clojure", "cljx" to "Clojure", "edn" to "Clojure",
+        "erl" to "Erlang", "ex" to "Elixir", "exs" to "Elixir",
         "jl" to "Julia", "zig" to "Zig", "sol" to "Solidity", "tf" to "Terraform",
         "hcl" to "Terraform", "nix" to "Nix", "f" to "Fortran", "for" to "Fortran",
         "f90" to "Fortran", "f95" to "Fortran", "f03" to "Fortran", "f08" to "Fortran",
@@ -80,6 +82,7 @@ object WorkspaceDoctor {
         "graphql" to "GraphQL", "gql" to "GraphQL", "tcl" to "Tcl",
         "tex" to "LaTeX", "ltx" to "LaTeX", "diff" to "Diff", "patch" to "Diff",
         "rmd" to "R Markdown", "rake" to "Ruby",
+        "mk" to "Make", "mak" to "Make", "make" to "Make", "properties" to "Config",
     )
     private val languageByFilename = mapOf(
         "dockerfile" to "Docker", "containerfile" to "Docker",
@@ -100,10 +103,10 @@ object WorkspaceDoctor {
     )
     private val textExtensions = setOf(
         "kt", "kts", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "cs",
-        "fs", "fsx", "fsi", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "coffee",
+        "fs", "fsx", "fsi", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "coffee", "s", "asm",
         "py", "pyw", "sh", "bash", "java", "go", "php", "rb", "rake", "swift", "groovy",
         "lua", "sql", "dart", "pl", "pm", "scala", "hs", "clj", "cljs", "cljc", "cljx",
-        "erl", "hrl", "ex", "exs", "vue", "svelte", "html", "css", "scss", "sass", "less",
+        "erl", "hrl", "ex", "exs", "cljc", "cljx", "edn", "vue", "svelte", "html", "css", "scss", "sass", "less",
         "xml", "xsl", "xsd", "md", "mdx", "jl", "zig", "sol", "tf", "hcl", "nix",
         "f", "for", "f90", "f95", "f03", "f08", "ml", "mli", "mm", "m", "ps1", "psm1",
         "psd1", "graphql", "gql", "tcl", "tex", "ltx", "diff", "patch", "json5", "jsonl",
