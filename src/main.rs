@@ -1597,7 +1597,7 @@ impl MinuxIde {
                 .hint_text("Вставь API-ключ из cloud.sambanova.ai"),
         );
         ui.add_space(5.0);
-        ui.label(RichText::new("Веб-панель: cloud.sambanova.ai. API endpoint: api.sambanova.ai/v1. Используй ключ SambaNova Cloud; он хранится локально в settings.json без шифрования.").size(10.0).color(ORANGE));
+        ui.label(RichText::new("Веб-панель: cloud.sambanova.ai. API endpoint: api.sambanova.ai/v1. Нужен API-ключ SambaNova Cloud; он хранится локально в settings.json без шифрования.").size(10.0).color(ORANGE));
         ui.add_space(16.0);
         ui.separator();
         ui.label(RichText::new("ОФОРМЛЕНИЕ").size(10.0).strong().color(self.accent_color()));
@@ -2607,6 +2607,21 @@ mod native_search_engine_tests {
 mod language_support_tests {
     use super::{file_icon_key_for_path, language_display_name, syntax_selector_for_path};
     use std::path::Path;
+
+    #[test]
+    fn highlights_real_hex_colors_and_ignores_css_id_names() {
+        use super::{hex_color_spans, parse_hex_color_token};
+        let source = "color: #ff3300; accent: #abc; shadow: #00112244; #main { }";
+        let spans = hex_color_spans(source);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(&source[spans[0].0.clone()], "#ff3300");
+        assert_eq!(&source[spans[1].0.clone()], "#abc");
+        assert_eq!(&source[spans[2].0.clone()], "#00112244");
+        let (actual, _) = parse_hex_color_token(b"f00").unwrap();
+        assert_eq!(actual, egui::Color32::from_rgb(255, 0, 0));
+        assert!(hex_color_spans("selector #main, .class").is_empty());
+        assert!(hex_color_spans("invalid #12345").is_empty());
+    }
 
     #[test]
     fn normalizes_svg_without_erasing_language_brand_colors() {
