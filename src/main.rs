@@ -1930,7 +1930,7 @@ fn file_icon_key_for_path(path: &Path) -> &'static str {
         "r" => "lang-r",
         "scala" | "sc" => "lang-scala",
         "hs" | "lhs" => "lang-haskell",
-        "clj" | "cljs" | "cljc" | "edn" => "lang-clojure",
+        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "lang-clojure",
         "erl" | "hrl" => "lang-erlang",
         "ex" | "exs" => "lang-elixir",
         "vue" => "lang-vue",
@@ -1950,7 +1950,7 @@ fn file_icon_key_for_path(path: &Path) -> &'static str {
         "sh" | "bash" | "zsh" | "fish" => "lang-bash",
         "xml" | "xsl" | "xslt" | "xsd" | "dtd" => "lang-xml",
         "html" | "htm" => "lang-html5",
-        "json" | "jsonc" => "lang-json",
+        "json" | "jsonc" | "json5" | "jsonl" => "lang-json",
         "md" | "markdown" | "txt" | "log" => "file-text",
         "css" | "scss" | "sass" | "less" => "lang-css3",
         "yml" | "yaml" => "lang-yaml",
@@ -1993,7 +1993,7 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "xslt" => "xslt",
         "html" | "htm" => "HTML",
         "json" | "jsonc" | "json5" | "jsonl" => "JSON",
-        "css" | "scss" | "sass" | "less" => "CSS
+        "css" | "scss" | "sass" | "less" => "CSS",
         "yml" | "yaml" => "YAML",
         "toml" => "TOML",
         "md" | "markdown" => "Markdown",
@@ -2006,9 +2006,9 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "swift" => "Swift",
         "kt" | "kts" => "Kotlin",
         "pl" | "pm" => "Perl",
-        "ps1" | "psm1" | "psd1" => "PowerShell
+        "ps1" | "psm1" | "psd1" => "PowerShell",
         "dockerfile" => "Dockerfile",
-        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure
+        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure",
         "coffee" => "CoffeeScript",
         "d" => "D",
         "diff" | "patch" => "Diff",
@@ -2019,7 +2019,8 @@ fn syntax_selector_for_path(path: &Path) -> &'static str {
         "m" => "MATLAB",
         "mm" => "Objective-C",
         "ml" | "mli" => "OCaml",
-        "r" | "rmd" => "R
+        "r" => "R",
+        "rmd" => "Markdown",
         "scala" | "sc" => "Scala",
         "jl" => "Julia",
         "zig" => "Zig",
@@ -2048,7 +2049,7 @@ fn language_display_name(path: &Path) -> &'static str {
     }
     match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
         "rs" => "Rust",
-        "ts" => "TypeScript",
+        "ts" | "mts" | "cts" => "TypeScript",
         "tsx" => "TSX",
         "js" | "mjs" | "cjs" => "JavaScript",
         "jsx" => "JSX",
@@ -2064,7 +2065,7 @@ fn language_display_name(path: &Path) -> &'static str {
         "xsd" => "XML Schema",
         "html" | "htm" => "HTML",
         "json" | "jsonc" | "json5" | "jsonl" => "JSON",
-        "css" | "scss" | "sass" | "less" => "CSS
+        "css" | "scss" | "sass" | "less" => "CSS",
         "yml" | "yaml" => "YAML",
         "toml" => "TOML",
         "md" | "markdown" => "Markdown",
@@ -2081,8 +2082,8 @@ fn language_display_name(path: &Path) -> &'static str {
         "swift" => "Swift",
         "kt" | "kts" => "Kotlin",
         "pl" | "pm" => "Perl",
-        "ps1" | "psm1" | "psd1" => "PowerShell
-        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure
+        "ps1" | "psm1" | "psd1" => "PowerShell",
+        "clj" | "cljs" | "cljc" | "cljx" | "edn" => "Clojure",
         "coffee" => "CoffeeScript",
         "d" => "D",
         "diff" | "patch" => "Diff",
@@ -2099,7 +2100,8 @@ fn language_display_name(path: &Path) -> &'static str {
         "tf" | "hcl" => "Terraform",
         "nix" => "Nix",
         "f" | "for" | "f90" | "f95" | "f03" | "f08" => "Fortran",
-        "r" | "rmd" => "R
+        "r" => "R",
+        "rmd" => "R Markdown",
         "scala" | "sc" => "Scala",
         "tcl" => "Tcl",
         "tex" | "ltx" => "LaTeX",
