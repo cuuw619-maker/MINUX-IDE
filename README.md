@@ -6,7 +6,7 @@
 
 ---
 
-MINUX IDE is a native desktop coding environment with a SambaNova Cloud coding agent, configurable appearance, high-resolution language icons and a user-triggered polyglot run command.
+MINUX IDE is a native desktop coding environment with a SambaNova Cloud coding agent, configurable appearance, high-resolution language icons, a spring-like animated activity capsule, scrollable workspace views and a user-triggered polyglot run command. The Windows build embeds `assets/minux-logo.ico` as its executable icon.
 
 ## Build
 
@@ -24,7 +24,7 @@ gradle -p kotlin run --args=".."
 cargo build --release --target x86_64-pc-windows-msvc
 ```
 
-GitHub Actions is **manual-only**. Start it from the Actions page with **Run workflow**. It validates TypeScript/JavaScript, regenerates the XSLT theme catalog, audits the polyglot sources, and builds the Windows executable. No workflow is triggered by a push.
+GitHub Actions runs on pushes to `main` and can also be started manually from the Actions page. It validates TypeScript/JavaScript, regenerates the XSLT theme catalog, audits the polyglot sources, runs Rust tests, and builds the Windows executable with its embedded icon.
 
 ## MINUX Agent / SambaNova Cloud API
 
