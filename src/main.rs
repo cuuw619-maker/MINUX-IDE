@@ -292,7 +292,7 @@ fn parse_hex_color_token(value: &[u8]) -> Option<(Color32, Color32)> {
     let actual = Color32::from_rgb(r, g, b);
     let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
     let readable = if luminance < 0.13 {
-        actual.lerp(Color32::WHITE, 0.48)
+        actual.lerp_to_gamma(Color32::WHITE, 0.48)
     } else {
         actual
     };
@@ -1675,7 +1675,7 @@ impl MinuxIde {
         ui.checkbox(&mut self.thinking_enabled, "Thinking / extended reasoning (если поддерживается моделью)");
         ui.horizontal(|ui| {
             ui.label(RichText::new("Максимум токенов ответа").size(11.0).color(MUTED));
-            egui::ComboBox::from_id_salt("duckduckgo_max_tokens")
+            egui::ComboBox::from_id_salt("sambanova_max_tokens")
                 .selected_text(self.max_tokens.to_string())
                 .show_ui(ui, |ui| {
                     for size in [512u32, 1024, 2048, 4096, 8192] {
