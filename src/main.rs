@@ -2646,7 +2646,7 @@ mod language_support_tests {
         assert_eq!(&source[spans[1].0.clone()], "#abc");
         assert_eq!(&source[spans[2].0.clone()], "#00112244");
         let (actual, _) = parse_hex_color_token(b"f00").unwrap();
-        assert_eq!(actual, egui::Color32::from_rgb(255, 0, 0));
+        assert_eq!(actual, eframe::egui::Color32::from_rgb(255, 0, 0));
         assert!(hex_color_spans("selector #main, .class").is_empty());
         assert!(hex_color_spans("#abc { color: white; }").is_empty());
         assert!(hex_color_spans("#abc:hover { color: white; }").is_empty());
