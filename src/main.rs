@@ -1149,7 +1149,7 @@ impl MinuxIde {
             return;
         }
 
-        match ai::normalize_duckduckgo_model_id(&self.model) {
+        match ai::normalize_api_model_id(&self.model) {
             Ok(model) => self.model = model,
             Err(error) => {
                 self.chat_messages.push(ChatEntry { user: false, content: error.clone(), reasoning: None });
@@ -1577,27 +1577,27 @@ impl MinuxIde {
         ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new("AI API / OPENAI-СОВМЕСТИМЫЙ").size(10.0).strong().color(self.accent_color()));
+        ui.label(RichText::new("SAMBANOVA CLOUD API").size(10.0).strong().color(self.accent_color()));
         ui.add_space(8.0);
         ui.label(RichText::new("Base URL API").size(12.0).color(TEXT));
         ui.add_sized(
             [ui.available_width().min(460.0), 34.0],
             egui::TextEdit::singleline(&mut self.api_base_url)
-                .hint_text("https://provider.example/v1"),
+                .hint_text("https://api.sambanova.ai/v1"),
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             draw_icon(ui, &self.icons, "key-round", 16.0, self.accent_color());
-            ui.label(RichText::new("API-токен (если требуется)").size(12.0).color(TEXT));
+            ui.label(RichText::new("API-ключ SambaNova").size(12.0).color(TEXT));
         });
         ui.add_sized(
             [ui.available_width().min(460.0), 34.0],
             egui::TextEdit::singleline(&mut self.api_key)
                 .password(true)
-                .hint_text("Токен провайдера; необязательно для анонимного API"),
+                .hint_text("Вставь API-ключ из cloud.sambanova.ai"),
         );
         ui.add_space(5.0);
-        ui.label(RichText::new("Ожидаются OpenAI-совместимые /chat/completions и /models. Старый endpoint DuckDuckGo, если возвращает HTTP 410, отключён на стороне сервиса: укажи актуальный Base URL. Токен хранится локально без шифрования.").size(10.0).color(ORANGE));
+        ui.label(RichText::new("Веб-панель: cloud.sambanova.ai. API endpoint: api.sambanova.ai/v1. Используй ключ SambaNova Cloud; он хранится локально в settings.json без шифрования.").size(10.0).color(ORANGE));
         ui.add_space(16.0);
         ui.separator();
         ui.label(RichText::new("ОФОРМЛЕНИЕ").size(10.0).strong().color(self.accent_color()));
@@ -1648,7 +1648,7 @@ impl MinuxIde {
                 egui::TextEdit::singleline(&mut self.model)
                     .hint_text("Организация/имя-модели"),
             );
-            egui::ComboBox::from_id_salt("duckduckgo_model_selector")
+            egui::ComboBox::from_id_salt("sambanova_model_selector")
                 .selected_text("Модели ▾")
                 .width(140.0)
                 .show_ui(ui, |ui| {
@@ -1701,7 +1701,7 @@ impl MinuxIde {
         settings_row(ui, "Syntax highlighting", "Syntect", GREEN);
         settings_row(ui, "SVG icons", "Lucide + Devicon", GREEN);
         settings_row(ui, "Native C core", &format!("C · v{}", unsafe { minux_engine_version() }), GREEN);
-        settings_row(ui, "AI endpoint", "Настраиваемый OpenAI-compatible API", GREEN);
+        settings_row(ui, "AI endpoint", "SambaNova Cloud · OpenAI-compatible", GREEN);
         settings_row(ui, "Compiled + JVM", "Rust · C/C++ · Assembly · Fortran · Go · C# · Java/Kotlin · JS/TS · Python", GREEN);
         settings_row(ui, "Script engines", "Shell/PowerShell · Ruby/PHP · Lua/Perl · Swift · Haskell/Scala · Julia/Zig", GREEN);
         settings_row(ui, "Project tools", "Clojure · Erlang · OCaml · D · Nix · F# · Tcl · Make · XSLT · Terraform", GREEN);
