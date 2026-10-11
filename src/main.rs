@@ -373,12 +373,18 @@ fn highlight_hex_colors(mut job: egui::text::LayoutJob) -> egui::text::LayoutJob
             if start != range_start {
                 section_part.leading_space = 0.0;
             }
-            if let Some((_, actual, readable)) = relevant.iter()
-                .find(|(range, _, _)| range.start <= start && end <= range.end)
-            {
-                section_part.format.color = *readable;
+            let color_override = relevant.iter().find_map(|item| {
+                let (range, actual, readable) = *item;
+                if range.start <= start && end <= range.end {
+                    Some((*actual, *readable))
+                } else {
+                    None
+                }
+            });
+            if let Some((actual, readable)) = color_override {
+                section_part.format.color = readable;
                 section_part.format.background = actual.gamma_multiply(0.18);
-                section_part.format.underline = Stroke::new(1.0, *actual);
+                section_part.format.underline = Stroke::new(1.0, actual);
             }
             result.push(section_part);
         }
@@ -671,7 +677,7 @@ fn home_workspace_row(
     let max_chars = ((rect.width() - 105.0) / 6.8).max(14.0) as usize;
     let chars: Vec<char> = path.chars().collect();
     let path_label = if chars.len() > max_chars {
-        let tail: String = chars.iter().skip(chars.len().saturating_sub(max_chars - 1)).collect();
+        let tail: String = chars.iter().copied().skip(chars.len().saturating_sub(max_chars - 1)).collect();
         format!("…{tail}")
     } else {
         path.to_owned()
