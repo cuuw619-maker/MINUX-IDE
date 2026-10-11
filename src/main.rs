@@ -582,6 +582,125 @@ fn toolbar_icon_button(
     response.on_hover_text(tooltip)
 }
 
+fn home_action_button(
+    ui: &mut egui::Ui,
+    icons: &HashMap<&'static str, egui::TextureHandle>,
+    label: &str,
+    icon: &str,
+    width: f32,
+    primary: bool,
+    accent: Color32,
+    animations_enabled: bool,
+    animation_speed: f32,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 44.0), egui::Sense::click());
+    let hover = if animations_enabled {
+        let raw = ui.ctx().animate_bool_with_time(
+            response.id.with("home-hover"),
+            response.hovered(),
+            0.14 / animation_speed.clamp(0.5, 2.0),
+        );
+        unsafe { minux_ease_out_cubic(raw) }
+    } else if response.hovered() { 1.0 } else { 0.0 };
+
+    let fill = if primary {
+        accent.gamma_multiply(0.20 + hover * 0.13)
+    } else {
+        PANEL_RAISED.gamma_multiply(0.70 + hover * 0.30)
+    };
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(10), fill);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(10),
+        Stroke::new(1.0, if primary { accent.gamma_multiply(0.45) } else { BORDER }),
+        egui::StrokeKind::Inside,
+    );
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 23.0, rect.center().y),
+        egui::vec2(19.0, 19.0),
+    );
+    paint_icon_at(ui, icons, icon, icon_rect, if primary { Color32::WHITE } else { accent });
+    ui.painter().text(
+        egui::pos2(rect.center().x + 10.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(12.5),
+        TEXT,
+    );
+    response.on_hover_text(label)
+}
+
+fn home_workspace_row(
+    ui: &mut egui::Ui,
+    icons: &HashMap<&'static str, egui::TextureHandle>,
+    label: &str,
+    path: &str,
+    accent: Color32,
+    animations_enabled: bool,
+    animation_speed: f32,
+) -> egui::Response {
+    let width = ui.available_width().min(940.0).max(180.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 54.0), egui::Sense::click());
+    let hover = if animations_enabled {
+        let raw = ui.ctx().animate_bool_with_time(
+            response.id.with("recent-hover"),
+            response.hovered(),
+            0.14 / animation_speed.clamp(0.5, 2.0),
+        );
+        unsafe { minux_ease_out_cubic(raw) }
+    } else if response.hovered() { 1.0 } else { 0.0 };
+
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(9),
+        PANEL_RAISED.gamma_multiply(0.50 + hover * 0.50),
+    );
+    if hover > 0.05 {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, rect.height())),
+            egui::CornerRadius::same(2),
+            accent.gamma_multiply(0.35 + hover * 0.4),
+        );
+    }
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 25.0, rect.center().y),
+        egui::vec2(22.0, 22.0),
+    );
+    paint_icon_at(ui, icons, "folder-open", icon_rect, if hover > 0.1 { accent } else { MUTED });
+
+    let max_chars = ((rect.width() - 105.0) / 6.8).max(14.0) as usize;
+    let chars: Vec<char> = path.chars().collect();
+    let path_label = if chars.len() > max_chars {
+        let tail: String = chars.iter().skip(chars.len().saturating_sub(max_chars - 1)).collect();
+        format!("…{tail}")
+    } else {
+        path.to_owned()
+    };
+    let text_x = rect.left() + 45.0;
+    ui.painter().text(
+        egui::pos2(text_x, rect.top() + 17.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.5),
+        TEXT,
+    );
+    ui.painter().text(
+        egui::pos2(text_x, rect.top() + 37.0),
+        egui::Align2::LEFT_CENTER,
+        path_label,
+        egui::FontId::proportional(10.0),
+        MUTED,
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - 14.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        ">",
+        egui::FontId::proportional(15.0),
+        if hover > 0.1 { accent } else { MUTED },
+    );
+    response.on_hover_text(path)
+}
+
 impl MinuxIde {
     fn open_workspace(&mut self) {
         if let Some(folder) = rfd::FileDialog::new().pick_folder() {
