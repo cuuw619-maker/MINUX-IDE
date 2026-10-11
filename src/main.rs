@@ -426,13 +426,13 @@ fn icon_fallback_text(name: &str) -> &'static str {
         };
     }
     match name {
-        "folder" => "⌂", "folder-open" => "↗", "file-code" => "</>",
-        "file-text" => "TXT", "search" => "⌕", "puzzle" => "◇", "bot" => "AI",
-        "settings-2" => "⚙", "save" => "↓", "terminal" => ">_",
-        "git-branch" => "⑂", "play" => "▶", "send" => "➤",
-        "key-round" => "⚿", "brain" => "AI", "cloud-download" => "↓",
-        "folder-plus" => "+", "file-plus" => "+", "refresh-cw" => "↻",
-        _ => "•",
+        "folder" => "D", "folder-open" => "O", "file-code" => "</>",
+        "file-text" => "TXT", "search" => "S", "puzzle" => "E", "bot" => "AI",
+        "settings-2" => "C", "save" => "V", "terminal" => ">_",
+        "git-branch" => "G", "play" => ">", "send" => ">",
+        "key-round" => "K", "brain" => "AI", "cloud-download" => "D",
+        "folder-plus" => "+", "file-plus" => "+", "refresh-cw" => "R",
+        _ => ".",
     }
 }
 
