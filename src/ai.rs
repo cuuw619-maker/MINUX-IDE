@@ -8,14 +8,14 @@ use std::{
     time::Duration,
 };
 
-const CHAT_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1/chat/completions";
-const MODELS_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1/models";
+const DEFAULT_API_BASE_URL: &str = "https://duckduckgo.com/duckduckgo-html-api/v1";
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOOL_ROUNDS: usize = 8;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiSettings {
+    pub api_base_url: String,
     pub token: String,
     pub model: String,
     pub thinking_enabled: bool,
@@ -37,6 +37,7 @@ pub struct AiSettings {
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
+            api_base_url: DEFAULT_API_BASE_URL.to_owned(),
             token: String::new(),
             model: "gpt-4o-mini".into(),
             thinking_enabled: true,
@@ -131,6 +132,8 @@ pub fn load_settings() -> AiSettings {
     let stored_model = settings.model.trim().to_owned();
     let known_legacy_model = legacy_hf_models().contains(&stored_model.as_str())
         || stored_model == "zai-org/GLM-5.3Qwen/Qwen2.5-Coder-32B-Instruct";
+    settings.api_base_url = normalize_api_base_url(&settings.api_base_url)
+        .unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_owned());
     settings.model = if known_legacy_model {
         AiSettings::default().model
     } else {
@@ -233,8 +236,39 @@ pub fn save_settings(settings: &AiSettings) -> Result<(), String> {
     fs::write(&path, data).map_err(|e| format!("Не удалось сохранить настройки: {e}"))
 }
 
+pub fn normalize_api_base_url(input: &str) -> Result<String, String> {
+    let input = input.trim().trim_end_matches('/');
+    if input.is_empty()
+        || input.chars().any(|ch| ch.is_whitespace() || matches!(ch, '?' | '#'))
+        || !(input.starts_with("https://") || input.starts_with("http://"))
+    {
+        return Err("Укажи Base URL API в формате https://provider.example/v1 без query-параметров.".into());
+    }
+
+    let mut base = input.to_owned();
+    for suffix in ["/chat/completions", "/models"] {
+        if base.ends_with(suffix) {
+            base.truncate(base.len() - suffix.len());
+            break;
+        }
+    }
+    let authority = base.split_once("://").map(|(_, rest)| rest)
+        .unwrap_or_default().split('/').next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') {
+        return Err("Base URL API должен содержать адрес сервера без логина, пароля и query-параметров.".into());
+    }
+    Ok(base.trim_end_matches('/').to_owned())
+}
+
+fn endpoint_url(base_url: &str, endpoint: &str) -> Result<String, String> {
+    let base = normalize_api_base_url(base_url)?;
+    Ok(format!("{}/{}", base, endpoint.trim_start_matches('/')))
+}
+
 fn build_client() -> Result<Client, String> {
     Client::builder()
+        // Surface redirect responses instead of silently following a retired API URL to an HTML page.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(15))
         .user_agent(concat!("MINUX-IDE/", env!("CARGO_PKG_VERSION")))
@@ -242,15 +276,21 @@ fn build_client() -> Result<Client, String> {
         .map_err(|e| format!("Не удалось инициализировать HTTP-клиент: {e}"))
 }
 
-pub fn fetch_models(token: &str) -> Result<Vec<String>, String> {
+pub fn fetch_models(api_base_url: &str, token: &str) -> Result<Vec<String>, String> {
     let client = build_client()?;
-    let mut request = client.get(MODELS_URL).header("Accept", "application/json");
+    let models_url = endpoint_url(api_base_url, "models")?;
+    let mut request = client.get(models_url).header("Accept", "application/json");
     if !token.trim().is_empty() {
         request = request.bearer_auth(token.trim());
     }
     let response = request.send()
         .map_err(|e| format!("Не удалось получить каталог DuckDuckGo Chat API: {e}"))?;
     let status = response.status();
+    if status.is_redirection() {
+        let location = response.headers().get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok()).map(str::to_owned);
+        return Err(redirect_error(status.as_u16(), location.as_deref()));
+    }
     let content_type = response.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
     let body = response.text().map_err(|e| format!("Не удалось прочитать каталог моделей: {e}"))?;
     if looks_like_html_response(&body, &content_type) {
@@ -302,9 +342,17 @@ fn looks_like_duckduckgo_page(content: &str) -> bool {
 }
 
 fn html_endpoint_error(status: u16) -> String {
+    if status == 410 {
+        return "Настроенный Chat API вернул HTTP 410 Gone: endpoint удалён или отключён. Повторные запросы и исправление сетевых перенаправлений это не исправят. Открой Настройки → AI API и укажи рабочий OpenAI-совместимый Base URL; ответ HTML не добавлен в историю чата.".into();
+    }
     format!(
-        "DuckDuckGo Chat API вернул HTML-страницу вместо JSON (HTTP {status}). Похоже, endpoint переадресован на обычную страницу DuckDuckGo или Chat API сейчас недоступен. Проверь доступность Chat API и сетевые перенаправления; endpoint в этой версии MINUX IDE задан внутри приложения. HTML страницы больше не будет показываться как ответ модели."
+        "Настроенный Chat API вернул HTML вместо JSON (HTTP {status}). Автоматическое следование перенаправлениям отключено, поэтому HTML не попадёт в историю чата. Проверь Base URL в настройках; если сервер вернул 301/302/307/308, приложение покажет заголовок Location."
     )
+}
+
+fn redirect_error(status: u16, location: Option<&str>) -> String {
+    let destination = location.map(|value| format!(" Location: {value}")).unwrap_or_default();
+    format!("Chat API вернул перенаправление HTTP {status}; оно не выполнено автоматически.{destination} Проверь Base URL в настройках. Если это старый endpoint DuckDuckGo, замени его на действующий OpenAI-совместимый API.")
 }
 
 fn format_api_error(status: u16, body: &str) -> String {
@@ -343,6 +391,7 @@ fn format_api_error(status: u16, body: &str) -> String {
         401 => format!("DuckDuckGo Chat API требует корректный токен (401). Токен в настройках необязателен, если endpoint разрешает анонимные запросы. {detail}"),
         403 => format!("DuckDuckGo Chat API запретил доступ (403). Проверь доступ к сервису. {detail}"),
         404 => format!("Endpoint или модель не найдены (404). Проверь ID модели и URL сервиса. {detail}"),
+        410 => format!("API вернул HTTP 410 Gone: endpoint удалён или отключён. Укажи актуальный Base URL в настройках; сетевые перенаправления и повторы этот ответ не исправят. {detail}"),
         429 => format!("Лимит запросов превышен (429). Подожди и повтори запрос. {detail}"),
         402 => format!("Сервис сообщил об ограничении квоты (402). {detail}"),
         _ => format!("Ошибка DuckDuckGo Chat API (HTTP {status}). {detail}"),
@@ -358,6 +407,7 @@ pub fn run_agent(
         return Err("Выбери модель из списка или введи её ID вручную.".into());
     }
     let mut settings = settings;
+    settings.api_base_url = normalize_api_base_url(&settings.api_base_url)?;
     settings.model = normalize_duckduckgo_model_id(&settings.model)?;
 
     let root = workspace_root.canonicalize()
@@ -466,6 +516,7 @@ fn request_assistant(
     messages: &[Value],
     tools: &Value,
 ) -> Result<Value, String> {
+    let chat_url = endpoint_url(&settings.api_base_url, "chat/completions")?;
     let mut active_messages = messages.to_vec();
     let mut send_tools = true;
 
@@ -481,7 +532,7 @@ fn request_assistant(
             payload["tools"] = tools.clone();
             payload["tool_choice"] = json!("auto");
         }
-        let mut request = client.post(CHAT_URL)
+        let mut request = client.post(&chat_url)
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .json(&payload);
@@ -492,6 +543,11 @@ fn request_assistant(
             .map_err(|e| format!("Запрос к DuckDuckGo Chat API не выполнен: {e}"))?;
 
         let status = response.status();
+        if status.is_redirection() {
+            let location = response.headers().get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok()).map(str::to_owned);
+            return Err(redirect_error(status.as_u16(), location.as_deref()));
+        }
         let content_type = response.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
         let body = response.text().map_err(|e| format!("Не удалось прочитать ответ модели: {e}"))?;
         if looks_like_html_response(&body, &content_type) {
@@ -1117,9 +1173,9 @@ fn write_workspace_file(root: &Path, relative: &str, content: &str) -> Result<St
 mod model_id_tests {
     use std::path::Path;
     use super::{
-        html_endpoint_error, looks_like_duckduckgo_page, looks_like_html_response,
-        normalize_duckduckgo_model_id, normalize_hex_color, normalize_model_id,
-        project_language, replace_exactly_once,
+        endpoint_url, html_endpoint_error, looks_like_duckduckgo_page, looks_like_html_response,
+        normalize_api_base_url, normalize_duckduckgo_model_id, normalize_hex_color,
+        normalize_model_id, project_language, redirect_error, replace_exactly_once,
     };
 
     #[test]
@@ -1171,6 +1227,23 @@ mod model_id_tests {
         assert_eq!(project_language(Path::new("tools/script.fsx")), Some("F#"));
         assert_eq!(project_language(Path::new("science/report.Rmd")), Some("R Markdown"));
         assert_eq!(project_language(Path::new("styles/theme.scss")), Some("CSS"));
+    }
+
+    #[test]
+    fn normalizes_configurable_openai_compatible_endpoints() {
+        assert_eq!(normalize_api_base_url(" https://api.example/v1/ ").unwrap(), "https://api.example/v1");
+        assert_eq!(endpoint_url("https://api.example/v1/chat/completions", "chat/completions").unwrap(), "https://api.example/v1/chat/completions");
+        assert_eq!(endpoint_url("https://api.example/v1/models", "models").unwrap(), "https://api.example/v1/models");
+        assert!(normalize_api_base_url("api.example/v1").is_err());
+        assert!(normalize_api_base_url("https://api.example/v1?token=x").is_err());
+    }
+
+    #[test]
+    fn redirects_are_reported_without_following_them() {
+        let error = redirect_error(302, Some("https://duckduckgo.com/"));
+        assert!(error.contains("HTTP 302"));
+        assert!(error.contains("Location: https://duckduckgo.com/"));
+        assert!(html_endpoint_error(410).contains("HTTP 410 Gone"));
     }
 
     #[test]
