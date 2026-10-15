@@ -946,23 +946,20 @@ impl MinuxIde {
                     });
                 });
         } else {
-            egui::ScrollArea::vertical()
-                .max_height((available_height * 0.36).clamp(110.0, 300.0))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for path in &recent {
-                        let label = Path::new(path).file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| path.clone());
-                        let response = home_workspace_row(
-                            ui, &self.icons, &label, path, accent,
-                            self.animations_enabled, self.animation_speed,
-                        );
-                        if response.clicked() {
-                            self.open_recent_workspace(path);
-                        }
-                    }
-                });
+            // Keep one page-level scroll target on the home screen. A nested recent
+            // projects scroller otherwise captures the wheel even when it is at an edge.
+            for path in &recent {
+                let label = Path::new(path).file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                let response = home_workspace_row(
+                    ui, &self.icons, &label, path, accent,
+                    self.animations_enabled, self.animation_speed,
+                );
+                if response.clicked() {
+                    self.open_recent_workspace(path);
+                }
+            }
         }
 
         ui.add_space(14.0);
@@ -1246,7 +1243,9 @@ impl MinuxIde {
         let mut selected_path: Option<PathBuf> = None;
 
         egui::ScrollArea::vertical()
+            .id_salt("minux-explorer-tree")
             .auto_shrink([false, false])
+            .max_height((ui.available_height() - 42.0).max(80.0))
             .show_rows(ui, 23.0, total_rows, |ui, row_range| {
                 let rows = self.visible_tree[row_range].to_vec();
                 for row in rows {
@@ -1374,6 +1373,7 @@ impl MinuxIde {
                     let icons = &self.icons;
                     let mut selected_path: Option<PathBuf> = None;
                     egui::ScrollArea::vertical()
+                        .id_salt("minux-search-results")
                         .auto_shrink([false, false])
                         .show_rows(ui, 23.0, total, |ui, row_range| {
                             let rows = self.search_results[row_range].to_vec();
@@ -1402,8 +1402,9 @@ impl MinuxIde {
                 ui.label(RichText::new("Подсветка Syntect · встроенные грамматики").size(10.0).color(MUTED));
                 ui.separator();
                 egui::ScrollArea::vertical()
+                    .id_salt("minux-language-list")
                     .auto_shrink([false, false])
-                    .max_height((ui.available_height() - 100.0).max(170.0))
+                    .max_height((ui.available_height() - 42.0).max(80.0))
                     .show(ui, |ui| {
                         for (icon, label) in [
                             ("lang-rust", "Rust"),
@@ -1499,9 +1500,13 @@ impl MinuxIde {
         });
         ui.separator();
 
-        let scroll_height = (ui.available_height() - 135.0).max(100.0);
+        // Leave the composer and model controls visible on short windows. Let the
+        // transcript give up its height before forcing the panel below the viewport.
+        let scroll_height = (ui.available_height() - 155.0).max(40.0);
         egui::ScrollArea::vertical()
+            .id_salt("minux-agent-chat")
             .max_height(scroll_height)
+            .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 for entry in &self.chat_messages {
@@ -1562,7 +1567,7 @@ impl MinuxIde {
     }
 
     fn draw_settings(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("minux-settings-page").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(14.0);
         ui.label(RichText::new("Настройки").size(25.0).strong().color(TEXT));
         ui.label(RichText::new("Подключение модели и рабочая среда MINUX IDE.").size(12.0).color(MUTED));
@@ -1882,7 +1887,7 @@ impl MinuxIde {
             if self.run_pending { ui.spinner(); }
         });
         ui.add_space(5.0);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("minux-output-scroll").auto_shrink([false, false]).show(ui, |ui| {
             ui.add(egui::Label::new(RichText::new(&self.run_output).monospace().size(11.5).color(TEXT)).wrap());
         });
     }
@@ -2208,9 +2213,14 @@ impl eframe::App for MinuxIde {
                         }
                     } else if self.show_output { 1.0 } else { 0.0 };
                     if self.show_output || output_panel_progress > 0.01 {
-                        let panel_height = self.output_panel_height.clamp(120.0, 480.0) * output_panel_progress;
                         let split_height = 7.0 * output_panel_progress;
-                        let editor_height = (available.y - panel_height - split_height).max(120.0);
+                        let editor_min_height = available.y.min(120.0).max(0.0);
+                        let output_max_height = (available.y - editor_min_height - split_height).max(0.0);
+                        let panel_height = self.output_panel_height
+                            .clamp(120.0, 480.0)
+                            .min(output_max_height)
+                            * output_panel_progress;
+                        let editor_height = (available.y - panel_height - split_height).max(0.0);
                         ui.allocate_ui_with_layout(
                             egui::vec2(available.x, editor_height),
                             egui::Layout::top_down(egui::Align::Min),
@@ -2820,3 +2830,4 @@ fn main() -> eframe::Result<()> {
         }),
     )
 }
+
